@@ -1,0 +1,167 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Input focus stillerini düzelt */
+input:focus, select:focus, textarea:focus {
+  outline: none !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5) !important;
+  border-color: #3b82f6 !important;
+}
+
+/* Modal overlay düzeltmesi */
+.modal-overlay {
+  backdrop-filter: blur(2px);
+}
+
+/* Scrollbar stilleri */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900;
+  }
+  
+  /* Performance optimizations */
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  /* Hardware acceleration for smooth animations */
+  .modal-overlay, .modal-content {
+    transform: translateZ(0);
+    will-change: transform;
+  }
+  
+  /* Smooth transitions for all interactive elements */
+  button, input, select, textarea, .btn-primary, .btn-secondary {
+    transition: all 0.15s ease-in-out;
+  }
+  
+  /* Prevent layout shifts */
+  .modal-content {
+    contain: layout style paint;
+  }
+  
+  /* Optimize scrolling */
+  .overflow-y-auto {
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary-600 hover:bg-primary-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded-lg transition-colors duration-200;
+  }
+  
+  .btn-success {
+    @apply bg-success-600 hover:bg-success-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200;
+  }
+  
+  .btn-danger {
+    @apply bg-danger-600 hover:bg-danger-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200;
+  }
+  
+  .card {
+    @apply bg-white rounded-xl shadow-sm border border-gray-200 p-6;
+  }
+  
+  .input-field {
+    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+  }
+
+  /* Öğretmen paneli özel stilleri */
+  .student-card {
+    @apply bg-white rounded-lg shadow-sm border p-4 cursor-pointer transition-all duration-200 hover:shadow-md hover:border-blue-300;
+  }
+
+  .student-card.selected {
+    @apply border-blue-500 bg-blue-50 shadow-md;
+  }
+
+  .stats-card {
+    @apply bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-lg p-4 text-center;
+  }
+
+  .stats-card.green {
+    @apply from-green-50 to-green-100 border-green-200;
+  }
+
+  .stats-card.purple {
+    @apply from-purple-50 to-purple-100 border-purple-200;
+  }
+
+  .stats-card.orange {
+    @apply from-orange-50 to-orange-100 border-orange-200;
+  }
+
+  .week-grid {
+    @apply bg-white rounded-lg shadow-sm border overflow-hidden;
+  }
+
+  .day-cell {
+    @apply min-h-[200px] p-4 border-r border-gray-200 last:border-r-0;
+  }
+
+  .schedule-day-header {
+    @apply border-b border-gray-200 pb-2 mb-3;
+  }
+
+  .program-item {
+    @apply bg-blue-50 border border-blue-200 rounded-lg p-2 mb-2;
+  }
+
+  .modal-content {
+    @apply relative bg-white rounded-lg shadow-xl mx-auto my-8 max-w-4xl w-full;
+  }
+
+  .modal-content.large {
+    @apply max-w-6xl;
+  }
+
+  .form-select {
+    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+  }
+
+  .form-input {
+    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+  }
+
+  .form-textarea {
+    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none;
+  }
+
+  .checkbox-group {
+    @apply grid grid-cols-3 gap-2;
+  }
+
+  .checkbox-item {
+    @apply flex items-center space-x-2;
+  }
+
+  .checkbox-input {
+    @apply h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded;
+  }
+} 
