@@ -38,7 +38,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import Toast from './Toast';
 
 const TeacherDashboard: React.FC = () => {
-  const { userData, currentUser } = useAuth();
+  const { userData, currentUser, createUserSilently } = useAuth();
   const [students, setStudents] = useState<any[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
@@ -88,9 +88,9 @@ const TeacherDashboard: React.FC = () => {
   const [studentForm, setStudentForm] = useState({
     name: '',
     email: '',
+    username: '',
     password: '',
-    confirmPassword: '',
-    packageType: 'basic' as 'basic' | 'standard' | 'premium'
+    confirmPassword: ''
   });
   const [parentForm, setParentForm] = useState({
     name: '',
@@ -1434,9 +1434,9 @@ const TeacherDashboard: React.FC = () => {
     setStudentForm({
       name: '',
       email: '',
+      username: '',
       password: '',
-      confirmPassword: '',
-      packageType: 'basic'
+      confirmPassword: ''
     });
   };
 
@@ -1472,9 +1472,9 @@ const TeacherDashboard: React.FC = () => {
     setStudentForm({
       name: student.name || '',
       email: student.email || '',
+      username: student.username || '',
       password: '',
-      confirmPassword: '',
-      packageType: student.packageType || 'basic'
+      confirmPassword: ''
     });
     setShowEditStudentModal(true);
   };
@@ -1501,7 +1501,6 @@ const TeacherDashboard: React.FC = () => {
       const updateData: any = {
         name: studentForm.name,
         email: studentForm.email,
-        packageType: studentForm.packageType,
         updatedAt: new Date()
       };
 
@@ -1736,7 +1735,7 @@ const TeacherDashboard: React.FC = () => {
 
   // Öğrenci ekleme fonksiyonu
   const addStudent = async () => {
-    if (!studentForm.name || !studentForm.email || !studentForm.password) {
+    if (!studentForm.name || !studentForm.email || !studentForm.username || !studentForm.password) {
       showToast('Lütfen tüm alanları doldurun', 'error');
       return;
     }
@@ -1752,7 +1751,7 @@ const TeacherDashboard: React.FC = () => {
     }
 
     try {
-      // E-posta kontrolü (manuel)
+      // E-posta kontrolü
       const emailQuery = query(collection(db, 'users'), where('email', '==', studentForm.email));
       const emailSnapshot = await getDocs(emailQuery);
       
@@ -1761,24 +1760,32 @@ const TeacherDashboard: React.FC = () => {
         return;
       }
 
-      // Benzersiz ID oluştur
-      const studentId = `student_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      // Kullanıcı adı kontrolü
+      const usernameQuery = query(collection(db, 'users'), where('username', '==', studentForm.username));
+      const usernameSnapshot = await getDocs(usernameQuery);
+      
+      if (!usernameSnapshot.empty) {
+        showToast('Bu kullanıcı adı zaten kullanımda', 'error');
+        return;
+      }
 
-      // Sadece Firestore'a kullanıcı bilgilerini kaydet (Auth hesabı oluşturmadan)
-      await setDoc(doc(db, 'users', studentId), {
+      // Öğrenci verilerini hazırla
+      const studentData = {
         name: studentForm.name,
         email: studentForm.email,
-        password: studentForm.password, // Geçici şifre, ilk girişte değiştirilecek
-        role: 'student',
-        teacherId: userData?.id, // Bu öğretmenin ID'si
-        packageType: studentForm.packageType,
+        username: studentForm.username,
+        role: 'student' as const,
+        teacherId: userData?.id,
         createdAt: new Date(),
         lastActivity: new Date(),
         isActive: true,
-        isFirstLogin: true // İlk giriş bayrağı
-      });
+        isFirstLogin: true
+      };
 
-      showToast(`${studentForm.name} başarıyla eklendi! Giriş bilgileri: ${studentForm.email}`, 'success');
+      // createUserSilently fonksiyonunu kullan
+      await createUserSilently(studentForm.email, studentForm.password, studentData);
+
+      showToast(`${studentForm.name} başarıyla eklendi! Giriş bilgileri: ${studentForm.username} / ${studentForm.password}`, 'success');
       setShowAddStudentModal(false);
       resetStudentForm();
       
@@ -1786,7 +1793,15 @@ const TeacherDashboard: React.FC = () => {
       await loadTeacherData();
     } catch (error: any) {
       console.error('Öğrenci ekleme hatası:', error);
-      showToast('Öğrenci eklenirken hata oluştu', 'error');
+      if (error.code === 'auth/email-already-in-use') {
+        showToast('Bu e-posta adresi zaten kullanımda', 'error');
+      } else if (error.code === 'auth/invalid-email') {
+        showToast('Geçersiz e-posta adresi', 'error');
+      } else if (error.code === 'auth/weak-password') {
+        showToast('Şifre çok zayıf', 'error');
+      } else {
+        showToast('Öğrenci eklenirken hata oluştu: ' + error.message, 'error');
+      }
     }
   };
 
@@ -2857,11 +2872,7 @@ const TeacherDashboard: React.FC = () => {
                         
                         <div className="text-xs text-gray-500 space-y-1 mb-3">
                           <p>📅 Kayıt: {(student as any).createdAt?.toDate?.()?.toLocaleDateString?.('tr-TR') || (student as any).createdAt?.toLocaleDateString?.('tr-TR') || 'Belirtilmemiş'}</p>
-                          <p>📦 Paket: {(() => {
-                            const packageType = (student as any).packageType || 'basic';
-                            const packageNames = { basic: 'Temel', standard: 'Standart', premium: 'Premium' };
-                            return packageNames[packageType as keyof typeof packageNames] || packageType;
-                          })()}</p>
+                          <p>👤 Kullanıcı Adı: {(student as any).username || 'Belirtilmemiş'}</p>
                           <p>🔗 ID: {student.id.slice(-8)}</p>
                         </div>
                         
@@ -3482,8 +3493,35 @@ const TeacherDashboard: React.FC = () => {
 
       {/* Aktivite Ekleme Modal */}
       {showAddActivityModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+        <div 
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-50 backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowAddActivityModal(false);
+              setEditingActivity(null);
+              setActivityForm({
+                day: '',
+                time: '',
+                subject: '',
+                topic: '',
+                type: 'konu'
+              });
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-xl p-6 w-full max-w-md mx-4 modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 className="text-lg font-semibold mb-4">
               {editingActivity ? 'Görev Düzenle' : 'Yeni Görev Ekle'}
             </h3>
@@ -3591,8 +3629,28 @@ const TeacherDashboard: React.FC = () => {
 
       {/* Öğrenci Ekleme Modal */}
       {showAddStudentModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+        <div 
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-50 backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowAddStudentModal(false);
+              resetStudentForm();
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-xl p-6 w-full max-w-md mx-4 modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">
                 👨‍🎓 Yeni Öğrenci Ekle
@@ -3637,6 +3695,19 @@ const TeacherDashboard: React.FC = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Kullanıcı Adı *
+                </label>
+                <input
+                  type="text"
+                  value={studentForm.username}
+                  onChange={(e) => setStudentForm(prev => ({ ...prev, username: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="kullaniciadi"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Şifre *
                 </label>
                 <input
@@ -3657,24 +3728,11 @@ const TeacherDashboard: React.FC = () => {
                   value={studentForm.confirmPassword}
                   onChange={(e) => setStudentForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Şifrenizi tekrar girin"
+                  placeholder="Şifreyi tekrar girin"
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Paket Türü
-                </label>
-                <select
-                  value={studentForm.packageType}
-                  onChange={(e) => setStudentForm(prev => ({ ...prev, packageType: e.target.value as 'basic' | 'standard' | 'premium' }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="basic">Temel</option>
-                  <option value="standard">Standart</option>
-                  <option value="premium">Premium</option>
-                </select>
-              </div>
+
             </div>
 
             <div className="flex gap-3 mt-6">
@@ -3700,8 +3758,28 @@ const TeacherDashboard: React.FC = () => {
 
       {/* Veli Ekleme Modal */}
       {showAddParentModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+        <div 
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-50 backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowAddParentModal(false);
+              resetParentForm();
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-xl p-6 w-full max-w-md mx-4 modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">
                 👨‍👩‍👧‍👦 Yeni Veli Ekle
@@ -3812,8 +3890,29 @@ const TeacherDashboard: React.FC = () => {
 
       {/* Öğrenci Düzenleme Modal */}
       {showEditStudentModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+        <div 
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-50 backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowEditStudentModal(false);
+              setEditingStudent(null);
+              resetStudentForm();
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-xl p-6 w-full max-w-md mx-4 modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">
                 ✏️ Öğrenci Düzenle
@@ -3885,20 +3984,7 @@ const TeacherDashboard: React.FC = () => {
                 </div>
               )}
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Paket Türü
-                </label>
-                <select
-                  value={studentForm.packageType}
-                  onChange={(e) => setStudentForm(prev => ({ ...prev, packageType: e.target.value as 'basic' | 'standard' | 'premium' }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                >
-                  <option value="basic">Temel</option>
-                  <option value="standard">Standart</option>
-                  <option value="premium">Premium</option>
-                </select>
-              </div>
+
             </div>
 
             <div className="flex gap-3 mt-6">
@@ -3925,8 +4011,28 @@ const TeacherDashboard: React.FC = () => {
 
       {/* Özel Konu Ekleme Modal */}
       {showCustomTopicModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+        <div 
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-50 backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowCustomTopicModal(false);
+              setCustomTopicForm({ name: '', subject: '', difficulty: 'medium' });
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-xl p-6 w-full max-w-md mx-4 modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">
                 ➕ Özel Konu Ekle
@@ -4201,8 +4307,27 @@ const TeacherDashboard: React.FC = () => {
 
       {/* Haftalık Düzenleme Modal */}
       {showWeeklyEditModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+        <div 
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-50 backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowWeeklyEditModal(false);
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-xl shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Modal Header */}
             <div className="bg-gradient-to-r from-blue-500 to-purple-500 text-white p-6 flex-shrink-0">
               <div className="flex items-center justify-between">
@@ -4430,8 +4555,21 @@ const TeacherDashboard: React.FC = () => {
 
       {/* Hafta Temizleme Onay Modal */}
       {showCleanupConfirmModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+        <div 
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-50 backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
+        >
+          <div 
+            className="bg-white rounded-xl shadow-xl max-w-md w-full modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+          >
             {/* Modal Header */}
             <div className="bg-gradient-to-r from-red-500 to-red-600 text-white p-6 rounded-t-xl">
               <div className="flex items-center justify-between">
@@ -4516,8 +4654,21 @@ const TeacherDashboard: React.FC = () => {
 
       {/* Öğrenci Silme Onay Modal */}
       {showDeleteConfirmModal && editingStudent && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+        <div 
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-50 backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
+        >
+          <div 
+            className="bg-white rounded-xl shadow-xl max-w-md w-full modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+          >
             {/* Modal Header */}
             <div className="bg-gradient-to-r from-red-500 to-red-600 text-white p-6 rounded-t-xl">
               <div className="flex items-center justify-between">
@@ -4608,7 +4759,15 @@ const TeacherDashboard: React.FC = () => {
       {/* Deneme Ekleme Modal */}
       {showExamModal && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center pt-8 pb-8 overflow-y-auto z-[9999] backdrop-blur-sm"
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-[9999] backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               closeExamModal();
@@ -4620,7 +4779,10 @@ const TeacherDashboard: React.FC = () => {
             }
           }}
         >
-          <div className="bg-white rounded-lg shadow-xl max-w-[600px] w-full max-h-[85vh] overflow-y-auto">
+          <div 
+            className="bg-white rounded-lg shadow-xl max-w-[600px] w-full max-h-[85vh] overflow-y-auto modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+          >
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">Yeni Deneme Ekle</h3>
@@ -5137,8 +5299,28 @@ const TeacherDashboard: React.FC = () => {
 
       {/* Deneme Görüntüleme Modal */}
       {showExamViewModal && selectedExam && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+        <div 
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-50 backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowExamViewModal(false);
+              setSelectedExam(null);
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-xl p-6 w-full max-w-md mx-4 modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 className="text-lg font-semibold mb-4">
               Deneme Analizi
             </h3>

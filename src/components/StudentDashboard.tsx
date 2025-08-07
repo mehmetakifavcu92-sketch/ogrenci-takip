@@ -4074,7 +4074,15 @@ const StudentDashboard: React.FC = () => {
       {/* Deneme Ekleme Modal */}
       {showExamModal && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center pt-8 pb-8 overflow-y-auto z-[9999] backdrop-blur-sm"
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-[9999] backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               closeExamModal();
@@ -4086,7 +4094,10 @@ const StudentDashboard: React.FC = () => {
             }
           }}
         >
-          <div className="bg-white rounded-lg shadow-xl max-w-[600px] w-full max-h-[85vh] overflow-y-auto">
+          <div 
+            className="bg-white rounded-lg shadow-xl max-w-[600px] w-full max-h-[85vh] overflow-y-auto modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+          >
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">Yeni Deneme Ekle</h3>
@@ -4882,9 +4893,29 @@ const StudentDashboard: React.FC = () => {
 
       {/* Deneme Görüntüleme Modal */}
       {showExamViewModal && selectedExam && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-start justify-center pt-8 pb-8 overflow-y-auto z-50">
-          <div className="relative mx-auto p-5 border w-[600px] shadow-lg rounded-md bg-white max-h-[85vh] overflow-y-auto">
-            <div className="mt-3">
+        <div 
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-[9999] backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowExamViewModal(false);
+              setSelectedExam(null);
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-xl max-w-[600px] w-full max-h-[85vh] overflow-y-auto modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">Deneme Detayları</h3>
                 <button
@@ -5218,8 +5249,27 @@ const StudentDashboard: React.FC = () => {
 
       {/* Konu Takibi Modal */}
       {showTopicProgressModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-lg shadow-xl max-w-[600px] w-full max-h-[90vh] overflow-y-auto">
+        <div 
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-[9999] backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowTopicProgressModal(false);
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-xl max-w-[600px] w-full max-h-[90vh] overflow-y-auto modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">Konu İlerlemesi Ekle</h3>
@@ -5347,7 +5397,15 @@ const StudentDashboard: React.FC = () => {
       {/* Konular Modal */}
       {showTopicsModal && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center pt-8 pb-8 overflow-y-auto z-[9999] backdrop-blur-sm"
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-[9999] backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
           data-modal="topics"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
@@ -5361,7 +5419,10 @@ const StudentDashboard: React.FC = () => {
           }}
           tabIndex={0}
         >
-          <div className="bg-white rounded-lg shadow-xl max-w-[800px] w-full max-h-[85vh] overflow-y-auto">
+          <div 
+            className="bg-white rounded-lg shadow-xl max-w-[800px] w-full max-h-[85vh] overflow-y-auto modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+          >
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-xl font-semibold text-gray-900">
@@ -5534,11 +5595,20 @@ const StudentDashboard: React.FC = () => {
       {/* Günlük Soru Çözme Modal */}
       {showDailyQuestionModal && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center pt-8 pb-8 overflow-y-auto z-[9999] backdrop-blur-sm"
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-[9999] backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
           onClick={closeDailyQuestionModal}
         >
           <div 
-            className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto"
+            className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto modal-content relative z-10"
+            style={{ marginTop: '8px' }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-6">
@@ -5762,8 +5832,21 @@ const StudentDashboard: React.FC = () => {
 
       {/* Deneme Analizi Modal */}
       {showExamAnalysisModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center pt-8 pb-8 overflow-y-auto z-[9999] backdrop-blur-sm">
-          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto">
+        <div 
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-[9999] backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+          >
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-lg font-medium text-gray-900">Deneme Analizi Kaydı</h3>
