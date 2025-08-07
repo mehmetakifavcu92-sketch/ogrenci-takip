@@ -31,7 +31,8 @@ import {
   Home,
   ChevronLeft,
   ChevronRight,
-  User
+  User,
+  X
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import Toast from './Toast';
@@ -68,8 +69,19 @@ const TeacherDashboard: React.FC = () => {
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [editingActivity, setEditingActivity] = useState<any>(null);
   
+  // Haftalık düzenleme modal state'leri
+  const [showWeeklyEditModal, setShowWeeklyEditModal] = useState(false);
+  const [weeklyEditData, setWeeklyEditData] = useState<any>({});
+  const [selectedEditDay, setSelectedEditDay] = useState<string>('pazartesi');
+  const [showCleanupConfirmModal, setShowCleanupConfirmModal] = useState(false);
+  
+  // Öğrenci arama ve filtreleme state'leri
+  const [studentSearchTerm, setStudentSearchTerm] = useState('');
+  const [studentFilter, setStudentFilter] = useState('all');
+  
   // Öğrenci/Veli Ekleme Modal State'leri
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
   const [showAddParentModal, setShowAddParentModal] = useState(false);
   const [showEditStudentModal, setShowEditStudentModal] = useState(false);
   const [editingStudent, setEditingStudent] = useState<any>(null);
@@ -126,6 +138,36 @@ const TeacherDashboard: React.FC = () => {
   const [showExamViewModal, setShowExamViewModal] = useState(false);
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   
+  // ESC ile modal kapatma
+  useEffect(() => {
+    const handleEscapeKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (showWeeklyEditModal) {
+          setShowWeeklyEditModal(false);
+        }
+        if (showAddActivityModal) {
+          setShowAddActivityModal(false);
+          setEditingActivity(null);
+        }
+        if (showCleanupConfirmModal) {
+          setShowCleanupConfirmModal(false);
+        }
+        if (showDeleteConfirmModal) {
+          setShowDeleteConfirmModal(false);
+          setEditingStudent(null);
+        }
+        if (showExamModal) {
+          closeExamModal();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleEscapeKey);
+    return () => {
+      document.removeEventListener('keydown', handleEscapeKey);
+    };
+  }, [showWeeklyEditModal, showAddActivityModal, showCleanupConfirmModal, showDeleteConfirmModal, showExamModal]);
+
   // Modal state optimization - will be defined after all modal states are declared
   const [examForm, setExamForm] = useState({
     name: '',
@@ -961,6 +1003,170 @@ const TeacherDashboard: React.FC = () => {
     }
   };
 
+  // Sadece seçili haftayı temizle
+  const cleanupCurrentWeek = async () => {
+    const weekStart = getStartOfWeek(selectedWeek);
+    const weekEnd = new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
+    
+    const weekRange = `${weekStart.toLocaleDateString('tr-TR')} - ${weekEnd.toLocaleDateString('tr-TR')}`;
+    
+    // Onay modalını göster
+    setShowCleanupConfirmModal(true);
+  };
+
+  const confirmCleanupCurrentWeek = async () => {
+    const weekStart = getStartOfWeek(selectedWeek);
+    const weekEnd = new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
+    
+    const weekRange = `${weekStart.toLocaleDateString('tr-TR')} - ${weekEnd.toLocaleDateString('tr-TR')}`;
+
+    try {
+      console.log('🧹 Seçili hafta temizliği başlıyor:', {
+        weekStart: weekStart,
+        weekEnd: weekEnd,
+        weekRange: weekRange
+      });
+      
+      // Seçili hafta için program bul
+      const existingProgram = weeklyPrograms.find(program => 
+        program.weekStart.getTime() === weekStart.getTime()
+      );
+      
+      if (existingProgram) {
+        // Programı sil
+        await deleteDoc(doc(db, 'weeklyPrograms', existingProgram.id));
+        
+        console.log('✅ Seçili hafta programı silindi:', {
+          programId: existingProgram.id,
+          weekRange: weekRange
+        });
+        
+        // Modal'ı kapat ve başarı mesajı göster
+        setShowCleanupConfirmModal(false);
+        showToast(`Bu hafta (${weekRange}) temizlendi!`, 'success');
+      } else {
+        console.log('ℹ️ Bu hafta için program bulunamadı:', {
+          weekRange: weekRange
+        });
+        setShowCleanupConfirmModal(false);
+        showToast('Bu hafta için program bulunamadı', 'info');
+      }
+      
+    } catch (error) {
+      console.error('Hafta temizliği hatası:', error);
+      setShowCleanupConfirmModal(false);
+      showToast('Hafta temizliği sırasında hata oluştu', 'error');
+    }
+  };
+
+  // Haftalık düzenleme modalını aç
+  const openWeeklyEditModal = () => {
+    const weekProgram = getWeekProgram();
+    setWeeklyEditData(weekProgram);
+    setShowWeeklyEditModal(true);
+  };
+
+  // Haftalık düzenleme modalında aktivite ekle
+  const addActivityToWeeklyEdit = (day: string) => {
+    const newActivity = {
+      id: Date.now().toString(),
+      time: '',
+      subject: '',
+      topic: '',
+      type: 'konu' as 'konu' | 'test' | 'deneme' | 'tekrar' | 'analiz'
+    };
+
+    setWeeklyEditData(prev => ({
+      ...prev,
+      [day]: [...(prev[day] || []), newActivity]
+    }));
+  };
+
+  // Haftalık düzenleme modalında aktivite güncelle
+  const updateActivityInWeeklyEdit = (day: string, activityId: string, field: string, value: any) => {
+    setWeeklyEditData(prev => ({
+      ...prev,
+      [day]: prev[day].map((activity: any) => 
+        activity.id === activityId ? { ...activity, [field]: value } : activity
+      )
+    }));
+  };
+
+  // Haftalık düzenleme modalında aktivite sil
+  const deleteActivityFromWeeklyEdit = (day: string, activityId: string) => {
+    setWeeklyEditData(prev => ({
+      ...prev,
+      [day]: prev[day].filter((activity: any) => activity.id !== activityId)
+    }));
+  };
+
+  // Haftalık düzenleme modalını kaydet
+  // Ders seçimi eksik aktiviteleri kontrol eden fonksiyon
+  const getEmptySubjectActivities = () => {
+    const emptyActivities: { day: string; activityId: string; dayName: string }[] = [];
+    
+    Object.keys(weeklyEditData).forEach(day => {
+      const activities = weeklyEditData[day] || [];
+      activities.forEach((activity: any) => {
+        if (!activity.subject) {
+          const dayNames = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+          const dayIndex = ['pazartesi', 'sali', 'carsamba', 'persembe', 'cuma', 'cumartesi', 'pazar'].indexOf(day);
+          emptyActivities.push({
+            day,
+            activityId: activity.id,
+            dayName: dayNames[dayIndex]
+          });
+        }
+      });
+    });
+    
+    return emptyActivities;
+  };
+
+  const saveWeeklyEdit = async () => {
+    try {
+      // Validation: Ders seçimi zorunlu mu kontrol et
+      const hasEmptySubjects = Object.keys(weeklyEditData).some(day => {
+        const activities = weeklyEditData[day] || [];
+        return activities.some((activity: any) => !activity.subject);
+      });
+
+      if (hasEmptySubjects) {
+        showToast('Lütfen tüm aktiviteler için ders seçin', 'error');
+        return;
+      }
+
+      const weekStart = getStartOfWeek(selectedWeek);
+      const existingProgram = weeklyPrograms.find(program => 
+        program.weekStart.getTime() === weekStart.getTime()
+      );
+
+      const updatedProgram = {
+        studentId: selectedStudent.id,
+        teacherId: userData?.id,
+        weekStart: weekStart,
+        weekEnd: new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000),
+        activities: weeklyEditData,
+        createdAt: existingProgram?.createdAt || new Date(),
+        updatedAt: new Date()
+      };
+
+      if (existingProgram) {
+        await updateDoc(doc(db, 'weeklyPrograms', existingProgram.id), updatedProgram);
+        console.log('✅ Haftalık program güncellendi:', existingProgram.id);
+      } else {
+        await addDoc(collection(db, 'weeklyPrograms'), updatedProgram);
+        console.log('✅ Yeni haftalık program oluşturuldu');
+      }
+
+      showToast('Haftalık program başarıyla kaydedildi!', 'success');
+      setShowWeeklyEditModal(false);
+    } catch (error) {
+      console.error('Haftalık program kaydetme hatası:', error);
+      showToast('Program kaydedilirken hata oluştu', 'error');
+    }
+  };
+
   const addActivity = async () => {
     if (!selectedStudent?.id || !activityForm.day || !activityForm.subject) {
       showToast('Lütfen ders alanını doldurun', 'error');
@@ -1057,15 +1263,27 @@ const TeacherDashboard: React.FC = () => {
 
   const getSubjectColor = (subject: string) => {
     const colors: { [key: string]: string } = {
+      'matematik': 'bg-blue-500 text-white',
+      'fizik': 'bg-green-500 text-white',
+      'kimya': 'bg-purple-500 text-white',
+      'biyoloji': 'bg-emerald-500 text-white',
+      'turkce': 'bg-red-500 text-white',
+      'tarih': 'bg-orange-500 text-white',
+      'cografya': 'bg-yellow-500 text-black', // sarıda siyah yazı
+      'felsefe': 'bg-indigo-500 text-white',
+      'ingilizce': 'bg-pink-500 text-white',
+      'diger': 'bg-gray-500 text-white',
+      // Büyük harfli versiyonlar da ekleyelim (backwards compatibility)
       'Matematik': 'bg-blue-500 text-white',
       'Fizik': 'bg-green-500 text-white',
       'Kimya': 'bg-purple-500 text-white',
       'Biyoloji': 'bg-emerald-500 text-white',
       'Türkçe': 'bg-red-500 text-white',
       'Tarih': 'bg-orange-500 text-white',
-      'Coğrafya': 'bg-yellow-500 text-black', // sarıda siyah yazı
+      'Coğrafya': 'bg-yellow-500 text-black',
       'Felsefe': 'bg-indigo-500 text-white',
-      'İngilizce': 'bg-pink-500 text-white'
+      'İngilizce': 'bg-pink-500 text-white',
+      'Diğer': 'bg-gray-500 text-white'
     };
     const result = colors[subject] || 'bg-gray-500 text-white';
     console.log('🎨 Öğretmen panel renk:', { subject, result });
@@ -1309,40 +1527,30 @@ const TeacherDashboard: React.FC = () => {
 
   // Öğrenci silme fonksiyonu
   const deleteStudent = async (student: any) => {
-    // eslint-disable-next-line no-restricted-globals
-    const isConfirmed = confirm(
-      `⚠️ UYARI: ${student.name} adlı öğrenciyi kalıcı olarak silmek istediğinizden emin misiniz?\n\n` +
-      `Bu işlem geri alınamaz ve aşağıdaki veriler tamamen silinir:\n` +
-      `• Öğrenci hesabı ve tüm bilgileri\n` +
-      `• Haftalık programları\n` +
-      `• Deneme sonuçları\n` +
-      `• Aktivite geçmişi\n\n` +
-      `Silmek için TAMAM'a basın.`
-    );
+    setEditingStudent(student);
+    setShowDeleteConfirmModal(true);
+  };
 
-    if (!isConfirmed) return;
-
+  const confirmDeleteStudent = async () => {
+    if (!editingStudent) return;
+    
     try {
       // Öğrenciyi users koleksiyonundan sil
-      await deleteDoc(doc(db, 'users', student.id));
+      await deleteDoc(doc(db, 'users', editingStudent.id));
 
       // İlgili haftalık programları sil
       const programsQuery = query(
         collection(db, 'weeklyPrograms'),
-        where('studentId', '==', student.id)
+        where('studentId', '==', editingStudent.id)
       );
       const programsSnapshot = await getDocs(programsQuery);
       
       const deletePromises = programsSnapshot.docs.map(doc => deleteDoc(doc.ref));
       await Promise.all(deletePromises);
 
-      showToast(`${student.name} ve tüm verileri başarıyla silindi!`, 'success');
-      
-      // Seçili öğrenci silinmişse seçimi temizle
-      if (selectedStudent?.id === student.id) {
-        setSelectedStudent(null);
-        localStorage.removeItem('teacher_selected_student');
-      }
+      showToast(`${editingStudent.name} başarıyla silindi!`, 'success');
+      setShowDeleteConfirmModal(false);
+      setEditingStudent(null);
       
       // Öğrenci listesini yenile
       await loadTeacherData();
@@ -1703,6 +1911,158 @@ const TeacherDashboard: React.FC = () => {
     };
   }, [students, selectedStudent]);
 
+  // Deneme ekleme fonksiyonları
+  const handleExamFormInput = (field: string, value: any) => {
+    setExamForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleExamFormDetailInput = (examType: 'tyt' | 'ayt', section: string, subsection: string, field: string, value: number) => {
+    setExamForm(prev => ({
+      ...prev,
+      [`${examType}Details`]: {
+        ...prev[`${examType}Details`],
+        [section]: {
+          ...prev[`${examType}Details`][section],
+          [subsection]: {
+            ...prev[`${examType}Details`][section][subsection],
+            [field]: value
+          }
+        }
+      }
+    }));
+  };
+
+  const handleAytInput = useCallback((field: 'MF' | 'TM' | 'TS' | 'DİL', subjectKey: string, type: 'correct' | 'wrong', value: string) => {
+    const numValue = value === '' ? 0 : parseInt(value) || 0;
+    setExamForm(prev => ({
+      ...prev,
+      aytDetails: {
+        ...prev.aytDetails,
+        [field]: {
+          ...prev.aytDetails[field],
+          [subjectKey]: {
+            ...prev.aytDetails[field][subjectKey as any],
+            [type]: numValue
+          }
+        }
+      }
+    }));
+  }, []);
+
+  const handleTytInput = useCallback((subjectKey: string, type: 'correct' | 'wrong', value: string) => {
+    const numValue = value === '' ? 0 : parseInt(value) || 0;
+    setExamForm(prev => ({
+      ...prev,
+      tytDetails: {
+        ...prev.tytDetails,
+        [subjectKey]: {
+          ...prev.tytDetails[subjectKey as keyof typeof prev.tytDetails],
+          [type]: numValue
+        }
+      }
+    }));
+  }, []);
+
+  const handleTytFenInput = useCallback((subjectKey: string, type: 'correct' | 'wrong', value: string) => {
+    const numValue = value === '' ? 0 : parseInt(value) || 0;
+    setExamForm(prev => {
+      const updatedFen = {
+        ...prev.tytDetails.fen,
+        [subjectKey]: {
+          ...prev.tytDetails.fen[subjectKey as keyof typeof prev.tytDetails.fen],
+          [type]: numValue
+        }
+      };
+      
+      // Recalculate totals
+      const totalCorrect = updatedFen.fizik.correct + updatedFen.kimya.correct + updatedFen.biyoloji.correct;
+      const totalWrong = updatedFen.fizik.wrong + updatedFen.kimya.wrong + updatedFen.biyoloji.wrong;
+      updatedFen.total = { correct: totalCorrect, wrong: totalWrong, total: 20 };
+      
+      return {
+        ...prev,
+        tytDetails: {
+          ...prev.tytDetails,
+          fen: updatedFen
+        }
+      };
+    });
+  }, []);
+
+  const handleTytSosyalInput = useCallback((subjectKey: string, type: 'correct' | 'wrong', value: string) => {
+    const numValue = value === '' ? 0 : parseInt(value) || 0;
+    setExamForm(prev => {
+      const updatedSosyal = {
+        ...prev.tytDetails.sosyal,
+        [subjectKey]: {
+          ...prev.tytDetails.sosyal[subjectKey as keyof typeof prev.tytDetails.sosyal],
+          [type]: numValue
+        }
+      };
+      
+      // Recalculate totals
+      const totalCorrect = updatedSosyal.tarih.correct + updatedSosyal.cografya.correct + updatedSosyal.felsefe.correct + updatedSosyal.din.correct;
+      const totalWrong = updatedSosyal.tarih.wrong + updatedSosyal.cografya.wrong + updatedSosyal.felsefe.wrong + updatedSosyal.din.wrong;
+      updatedSosyal.total = { correct: totalCorrect, wrong: totalWrong, total: 20 };
+      
+      return {
+        ...prev,
+        tytDetails: {
+          ...prev.tytDetails,
+          sosyal: updatedSosyal
+        }
+      };
+    });
+  }, []);
+
+  // AYT için otomatik hesaplama fonksiyonları
+  const calculateAytTotals = useCallback((field: 'MF' | 'TM' | 'TS' | 'DİL') => {
+    const details = examForm.aytDetails[field];
+    let totalCorrect = 0;
+    let totalWrong = 0;
+    let totalQuestions = 0;
+
+    if (field === 'MF') {
+      const mfDetails = details as typeof examForm.aytDetails.MF;
+      totalCorrect = mfDetails.matematik.correct + mfDetails.fizik.correct + mfDetails.kimya.correct + mfDetails.biyoloji.correct;
+      totalWrong = mfDetails.matematik.wrong + mfDetails.fizik.wrong + mfDetails.kimya.wrong + mfDetails.biyoloji.wrong;
+      totalQuestions = 80;
+    } else if (field === 'TM') {
+      const tmDetails = details as typeof examForm.aytDetails.TM;
+      totalCorrect = tmDetails.matematik.correct + tmDetails.turkce.correct + tmDetails.tarih.correct + tmDetails.cografya.correct;
+      totalWrong = tmDetails.matematik.wrong + tmDetails.turkce.wrong + tmDetails.tarih.wrong + tmDetails.cografya.wrong;
+      totalQuestions = 80;
+    } else if (field === 'TS') {
+      const tsDetails = details as typeof examForm.aytDetails.TS;
+      totalCorrect = tsDetails.turkce.correct + tsDetails.tarih1.correct + tsDetails.cografya1.correct + 
+                    tsDetails.tarih2.correct + tsDetails.cografya2.correct + tsDetails.felsefe.correct + tsDetails.din.correct;
+      totalWrong = tsDetails.turkce.wrong + tsDetails.tarih1.wrong + tsDetails.cografya1.wrong + 
+                  tsDetails.tarih2.wrong + tsDetails.cografya2.wrong + tsDetails.felsefe.wrong + tsDetails.din.wrong;
+      totalQuestions = 80;
+    } else if (field === 'DİL') {
+      const dilDetails = details as typeof examForm.aytDetails.DİL;
+      totalCorrect = dilDetails.ingilizce.correct;
+      totalWrong = dilDetails.ingilizce.wrong;
+      totalQuestions = 80;
+    }
+
+    return { totalCorrect, totalWrong, totalQuestions, net: totalCorrect - (totalWrong * 0.25) };
+  }, [examForm.aytDetails]);
+
+  // TYT için otomatik hesaplama fonksiyonu
+  const calculateTytTotals = useCallback(() => {
+    const turkce = examForm.tytDetails.turkce;
+    const matematik = examForm.tytDetails.matematik;
+    const fen = examForm.tytDetails.fen.total;
+    const sosyal = examForm.tytDetails.sosyal.total;
+
+    const totalCorrect = turkce.correct + matematik.correct + fen.correct + sosyal.correct;
+    const totalWrong = turkce.wrong + matematik.wrong + fen.wrong + sosyal.wrong;
+    const totalQuestions = 120;
+
+    return { totalCorrect, totalWrong, totalQuestions, net: totalCorrect - (totalWrong * 0.25) };
+  }, [examForm.tytDetails]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -1710,6 +2070,212 @@ const TeacherDashboard: React.FC = () => {
       </div>
     );
   }
+
+  const closeExamModal = () => {
+    setShowExamModal(false);
+    // Reset form after a short delay to prevent flickering
+    setTimeout(() => {
+      setExamForm({
+        name: '',
+        type: 'TYT',
+        field: 'MF',
+        date: new Date().toISOString().split('T')[0],
+        correctAnswers: 0,
+        wrongAnswers: 0,
+        totalQuestions: 0,
+        score: 0,
+        tytDetails: {
+          turkce: { correct: 0, wrong: 0, total: 40 },
+          matematik: { correct: 0, wrong: 0, total: 40 },
+          fen: {
+            fizik: { correct: 0, wrong: 0, total: 7 },
+            kimya: { correct: 0, wrong: 0, total: 7 },
+            biyoloji: { correct: 0, wrong: 0, total: 6 },
+            total: { correct: 0, wrong: 0, total: 20 }
+          },
+          sosyal: {
+            tarih: { correct: 0, wrong: 0, total: 5 },
+            cografya: { correct: 0, wrong: 0, total: 5 },
+            felsefe: { correct: 0, wrong: 0, total: 5 },
+            din: { correct: 0, wrong: 0, total: 5 },
+            total: { correct: 0, wrong: 0, total: 20 }
+          }
+        },
+        aytDetails: {
+          MF: {
+            matematik: { correct: 0, wrong: 0, total: 40 },
+            fizik: { correct: 0, wrong: 0, total: 14 },
+            kimya: { correct: 0, wrong: 0, total: 13 },
+            biyoloji: { correct: 0, wrong: 0, total: 13 }
+          },
+          TM: {
+            matematik: { correct: 0, wrong: 0, total: 40 },
+            turkce: { correct: 0, wrong: 0, total: 24 },
+            tarih: { correct: 0, wrong: 0, total: 10 },
+            cografya: { correct: 0, wrong: 0, total: 6 }
+          },
+          TS: {
+            turkce: { correct: 0, wrong: 0, total: 24 },
+            tarih1: { correct: 0, wrong: 0, total: 10 },
+            cografya1: { correct: 0, wrong: 0, total: 6 },
+            tarih2: { correct: 0, wrong: 0, total: 11 },
+            cografya2: { correct: 0, wrong: 0, total: 11 },
+            felsefe: { correct: 0, wrong: 0, total: 12 },
+            din: { correct: 0, wrong: 0, total: 6 }
+          },
+          DİL: {
+            ingilizce: { correct: 0, wrong: 0, total: 80 }
+          }
+        }
+      });
+    }, 100);
+  };
+
+  const addExam = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!selectedStudent?.id) {
+      showToast('Öğrenci seçilmedi!', 'error');
+      return;
+    }
+
+    try {
+      console.log('Adding exam with form data:', examForm);
+      let correctAnswers = 0;
+      let wrongAnswers = 0;
+      let totalQuestions = 0;
+
+      if (examForm.type === 'TYT') {
+        // TYT için toplam hesaplama
+        // ÖNEMLİ: total değerleri sabit olmalı (Türkçe=40, Matematik=40)
+        // Girilen correct+wrong değerleri total'dan fazla olamaz
+        const turkceTotal = examForm.tytDetails.turkce.total || 40; // Sabit değer
+        const matematikTotal = examForm.tytDetails.matematik.total || 40; // Sabit değer
+        
+        console.log('TYT Exam saving - Türkçe:', {
+          correct: examForm.tytDetails.turkce.correct,
+          wrong: examForm.tytDetails.turkce.wrong,
+          total: turkceTotal,
+          blank_calculated: turkceTotal - examForm.tytDetails.turkce.correct - examForm.tytDetails.turkce.wrong
+        });
+        // Fen ve Sosyal için sabit toplam değerler (YKS standartları)
+        const fenTotal = 20; // Fizik:7 + Kimya:7 + Biyoloji:6 = 20
+        const sosyalTotal = 20; // Tarih:5 + Coğrafya:5 + Felsefe:5 + Din:5 = 20
+
+        correctAnswers = examForm.tytDetails.turkce.correct + 
+                        examForm.tytDetails.matematik.correct + 
+                        examForm.tytDetails.fen.fizik.correct + examForm.tytDetails.fen.kimya.correct + 
+                        examForm.tytDetails.fen.biyoloji.correct + examForm.tytDetails.sosyal.tarih.correct + 
+                        examForm.tytDetails.sosyal.cografya.correct + examForm.tytDetails.sosyal.felsefe.correct + 
+                        examForm.tytDetails.sosyal.din.correct;
+        
+        wrongAnswers = examForm.tytDetails.turkce.wrong + examForm.tytDetails.matematik.wrong + 
+                      examForm.tytDetails.fen.fizik.wrong + examForm.tytDetails.fen.kimya.wrong + 
+                      examForm.tytDetails.fen.biyoloji.wrong + examForm.tytDetails.sosyal.tarih.wrong + 
+                      examForm.tytDetails.sosyal.cografya.wrong + examForm.tytDetails.sosyal.felsefe.wrong + 
+                      examForm.tytDetails.sosyal.din.wrong;
+        
+        totalQuestions = turkceTotal + matematikTotal + fenTotal + sosyalTotal;
+      } else {
+        // AYT için alan bazlı hesaplama
+        if (examForm.field === 'MF') {
+          correctAnswers = examForm.aytDetails.MF.matematik.correct + examForm.aytDetails.MF.fizik.correct + 
+                          examForm.aytDetails.MF.kimya.correct + examForm.aytDetails.MF.biyoloji.correct;
+          wrongAnswers = examForm.aytDetails.MF.matematik.wrong + examForm.aytDetails.MF.fizik.wrong + 
+                        examForm.aytDetails.MF.kimya.wrong + examForm.aytDetails.MF.biyoloji.wrong;
+          totalQuestions = 80;
+        } else if (examForm.field === 'TM') {
+          correctAnswers = examForm.aytDetails.TM.matematik.correct + examForm.aytDetails.TM.turkce.correct + 
+                          examForm.aytDetails.TM.tarih.correct + examForm.aytDetails.TM.cografya.correct;
+          wrongAnswers = examForm.aytDetails.TM.matematik.wrong + examForm.aytDetails.TM.turkce.wrong + 
+                        examForm.aytDetails.TM.tarih.wrong + examForm.aytDetails.TM.cografya.wrong;
+          totalQuestions = 80;
+        } else if (examForm.field === 'TS') {
+          correctAnswers = examForm.aytDetails.TS.turkce.correct + examForm.aytDetails.TS.tarih1.correct + 
+                          examForm.aytDetails.TS.cografya1.correct + examForm.aytDetails.TS.tarih2.correct + 
+                          examForm.aytDetails.TS.cografya2.correct + examForm.aytDetails.TS.felsefe.correct + 
+                          examForm.aytDetails.TS.din.correct;
+          wrongAnswers = examForm.aytDetails.TS.turkce.wrong + examForm.aytDetails.TS.tarih1.wrong + 
+                        examForm.aytDetails.TS.cografya1.wrong + examForm.aytDetails.TS.tarih2.wrong + 
+                        examForm.aytDetails.TS.cografya2.wrong + examForm.aytDetails.TS.felsefe.wrong + 
+                        examForm.aytDetails.TS.din.wrong;
+          totalQuestions = 80;
+        } else if (examForm.field === 'DİL') {
+          correctAnswers = examForm.aytDetails.DİL.ingilizce.correct;
+          wrongAnswers = examForm.aytDetails.DİL.ingilizce.wrong;
+          totalQuestions = 80;
+        }
+      }
+
+      const score = totalQuestions > 0 ? Math.round((correctAnswers / totalQuestions) * 100) : 0;
+
+      const newExam = {
+        studentId: selectedStudent.id,
+        teacherId: userData?.id,
+        name: examForm.name,
+        type: examForm.type,
+        field: examForm.field,
+        date: new Date(examForm.date),
+        correctAnswers,
+        wrongAnswers,
+        totalQuestions,
+        score,
+        isAnalyzed: false,
+        ...(examForm.type === 'TYT' && { tytDetails: examForm.tytDetails }),
+        ...(examForm.type === 'AYT' && { aytDetails: examForm.aytDetails }),
+        createdAt: new Date()
+      };
+
+      console.log('New exam object:', newExam);
+
+      await addDoc(collection(db, 'exams'), newExam);
+      showToast('Deneme başarıyla eklendi!', 'success');
+      
+      closeExamModal();
+      
+      // Verileri yenile
+      await loadStudentSpecificData(selectedStudent.id);
+    } catch (error) {
+      console.error('Deneme eklenirken hata:', error);
+      console.error('Hata detayı:', error instanceof Error ? error.message : error);
+      showToast(`Deneme eklenirken hata oluştu: ${error instanceof Error ? error.message : 'Bilinmeyen hata'}`, 'error');
+    }
+  };
+
+  const viewExam = (exam: Exam) => {
+    setSelectedExam(exam);
+    setShowExamViewModal(true);
+  };
+
+  const toggleExamAnalysis = async (examId: string, currentStatus: boolean) => {
+    try {
+      await updateDoc(doc(db, 'exams', examId), {
+        isAnalyzed: !currentStatus,
+        updatedAt: new Date()
+      });
+      
+      showToast(`Deneme analizi ${!currentStatus ? 'etkinleştirildi' : 'devre dışı bırakıldı'}!`, 'success');
+      await loadStudentSpecificData(selectedStudent.id);
+    } catch (error) {
+      console.error('Deneme analizi güncellenirken hata:', error);
+      showToast('Deneme analizi güncellenirken hata oluştu', 'error');
+    }
+  };
+
+  const deleteExam = async (examId: string) => {
+    if (!window.confirm('Bu denemeyi silmek istediğinizden emin misiniz?')) {
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'exams', examId));
+      showToast('Deneme başarıyla silindi!', 'success');
+      await loadStudentSpecificData(selectedStudent.id);
+    } catch (error) {
+      console.error('Deneme silinirken hata:', error);
+      showToast('Deneme silinirken hata oluştu', 'error');
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -1955,10 +2521,10 @@ const TeacherDashboard: React.FC = () => {
                   Öğrenciniz için haftalık çalışma programı oluşturun ve yönetin
                 </p>
                 <button
-                  onClick={cleanupOldPrograms}
+                  onClick={cleanupCurrentWeek}
                   className="mt-3 px-4 py-2 bg-red-500 text-white text-sm rounded-lg hover:bg-red-600 transition-colors"
                 >
-                  🧹 Eski Programları Temizle
+                  🧹 Bu Haftayı Temizle
                 </button>
               </div>
               <div className="flex items-center space-x-4">
@@ -1986,11 +2552,11 @@ const TeacherDashboard: React.FC = () => {
                   </button>
                 </div>
                 <button 
-                  onClick={() => setShowAddActivityModal(true)}
-                  className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2"
+                  onClick={openWeeklyEditModal}
+                  className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2"
                 >
-                  <Plus className="h-4 w-4" />
-                  <span>Görev Ekle</span>
+                  <Edit className="h-4 w-4" />
+                  <span>Tüm Haftayı Düzenle</span>
                 </button>
               </div>
             </div>
@@ -2193,7 +2759,34 @@ const TeacherDashboard: React.FC = () => {
           {/* Öğrenci Listesi */}
           <div className="bg-white rounded-xl shadow-sm border">
             <div className="p-6 border-b">
-              <h3 className="text-lg font-semibold text-gray-900">Öğrencilerim ({students.length})</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900">Öğrencilerim ({students.length})</h3>
+                <div className="flex items-center space-x-3">
+                  {/* Arama Kutusu */}
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Öğrenci ara..."
+                      className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-64"
+                      value={studentSearchTerm}
+                      onChange={(e) => setStudentSearchTerm(e.target.value)}
+                    />
+                    <svg className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                  {/* Filtre Butonu */}
+                  <select
+                    value={studentFilter}
+                    onChange={(e) => setStudentFilter(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="all">Tümü</option>
+                    <option value="active">Aktif</option>
+                    <option value="inactive">Pasif</option>
+                  </select>
+                </div>
+              </div>
             </div>
             <div className="p-6">
               {students.length === 0 ? (
@@ -2210,9 +2803,20 @@ const TeacherDashboard: React.FC = () => {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {students.map((student) => {
-                    const isActive = (student as any).isActive !== false; // Default true if undefined
-                    return (
+                  {students
+                    .filter((student) => {
+                      const isActive = (student as any).isActive !== false;
+                      const matchesSearch = studentSearchTerm === '' || 
+                        (student as any).name?.toLowerCase().includes(studentSearchTerm.toLowerCase()) ||
+                        (student as any).email?.toLowerCase().includes(studentSearchTerm.toLowerCase());
+                      const matchesFilter = studentFilter === 'all' || 
+                        (studentFilter === 'active' && isActive) ||
+                        (studentFilter === 'inactive' && !isActive);
+                      return matchesSearch && matchesFilter;
+                    })
+                    .map((student) => {
+                      const isActive = (student as any).isActive !== false; // Default true if undefined
+                      return (
                       <div key={student.id} className={`border rounded-lg p-4 hover:shadow-md transition-shadow ${
                         isActive ? 'bg-white border-gray-200' : 'bg-gray-50 border-gray-300'
                       }`}>
@@ -2252,8 +2856,12 @@ const TeacherDashboard: React.FC = () => {
                         </div>
                         
                         <div className="text-xs text-gray-500 space-y-1 mb-3">
-                          <p>📅 Kayıt: {(student as any).createdAt?.toLocaleDateString?.() || 'Belirtilmemiş'}</p>
-                          <p>📦 Paket: {(student as any).packageType || 'basic'}</p>
+                          <p>📅 Kayıt: {(student as any).createdAt?.toDate?.()?.toLocaleDateString?.('tr-TR') || (student as any).createdAt?.toLocaleDateString?.('tr-TR') || 'Belirtilmemiş'}</p>
+                          <p>📦 Paket: {(() => {
+                            const packageType = (student as any).packageType || 'basic';
+                            const packageNames = { basic: 'Temel', standard: 'Standart', premium: 'Premium' };
+                            return packageNames[packageType as keyof typeof packageNames] || packageType;
+                          })()}</p>
                           <p>🔗 ID: {student.id.slice(-8)}</p>
                         </div>
                         
@@ -2296,7 +2904,7 @@ const TeacherDashboard: React.FC = () => {
 
           {/* İstatistikler */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-white rounded-xl shadow-sm p-4 border">
+            <div className="bg-white rounded-xl shadow-sm p-4 border hover:shadow-md transition-shadow">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
                   <User className="h-5 w-5 text-blue-600" />
@@ -2307,7 +2915,7 @@ const TeacherDashboard: React.FC = () => {
                 </div>
               </div>
             </div>
-            <div className="bg-white rounded-xl shadow-sm p-4 border">
+            <div className="bg-white rounded-xl shadow-sm p-4 border hover:shadow-md transition-shadow">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
                   <CheckCircle className="h-5 w-5 text-green-600" />
@@ -2320,7 +2928,7 @@ const TeacherDashboard: React.FC = () => {
                 </div>
               </div>
             </div>
-            <div className="bg-white rounded-xl shadow-sm p-4 border">
+            <div className="bg-white rounded-xl shadow-sm p-4 border hover:shadow-md transition-shadow">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
                   <Calendar className="h-5 w-5 text-purple-600" />
@@ -2340,16 +2948,19 @@ const TeacherDashboard: React.FC = () => {
                 </div>
               </div>
             </div>
-            <div className="bg-white rounded-xl shadow-sm p-4 border">
+            <div className="bg-white rounded-xl shadow-sm p-4 border hover:shadow-md transition-shadow">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center">
                   <Star className="h-5 w-5 text-yellow-600" />
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-gray-900">
-                    {students.length > 0 ? Math.round(students.length / 30 * 100) / 100 : 0}
+                    {(() => {
+                      const activeStudents = students.filter(s => (s as any).isActive !== false);
+                      return activeStudents.length > 0 ? Math.round((activeStudents.length / students.length) * 100) : 0;
+                    })()}%
                   </p>
-                  <p className="text-sm text-gray-500">Günlük Ortalama</p>
+                  <p className="text-sm text-gray-500">Aktiflik Oranı</p>
                 </div>
               </div>
             </div>
@@ -2725,7 +3336,130 @@ const TeacherDashboard: React.FC = () => {
       )}
 
       {/* Diğer tab'ler için geçici içerik */}
-      {activeTab !== 'overview' && activeTab !== 'studyProgram' && activeTab !== 'studentManagement' && activeTab !== 'topicTracking' && (
+            {/* Denemeler Tab */}
+      {activeTab === 'exams' && (
+        <div className="space-y-6">
+          {/* Header */}
+          <div className="bg-white rounded-xl shadow-sm p-6 border">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 mb-2">
+                  📊 {selectedStudent ? `${selectedStudent.name} için Denemeler` : 'Denemeler'}
+                </h2>
+                <p className="text-gray-600">
+                  Öğrencinizin deneme sonuçlarını görüntüleyin ve yeni deneme ekleyin
+                </p>
+              </div>
+              <button
+                onClick={() => setShowExamModal(true)}
+                className="btn-primary flex items-center space-x-2"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Deneme Ekle</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Deneme Listesi */}
+          <div className="bg-white rounded-xl shadow-sm border">
+            <div className="p-6 border-b">
+              <h3 className="text-lg font-semibold text-gray-900">Deneme Sonuçları</h3>
+            </div>
+            
+            {exams.length === 0 ? (
+              <div className="p-8 text-center">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Brain className="h-8 w-8 text-gray-400" />
+                </div>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Henüz Deneme Yok</h3>
+                <p className="text-gray-600 mb-4">
+                  {selectedStudent ? `${selectedStudent.name} için henüz deneme sonucu girilmemiş.` : 'Öğrenci seçilmedi.'}
+                </p>
+                {selectedStudent && (
+                  <button
+                    onClick={() => setShowExamModal(true)}
+                    className="btn-primary"
+                  >
+                    İlk Denemeyi Ekle
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="divide-y">
+                {exams.map((exam) => (
+                  <div key={exam.id} className="p-6 hover:bg-gray-50 transition-colors">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-3">
+                          <div className={`w-3 h-3 rounded-full ${
+                            exam.score >= 80 ? 'bg-green-500' :
+                            exam.score >= 60 ? 'bg-yellow-500' :
+                            'bg-red-500'
+                          }`}></div>
+                          <div>
+                            <h4 className="font-medium text-gray-900">{exam.name}</h4>
+                            <div className="flex items-center space-x-4 text-sm text-gray-500">
+                              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                                {exam.type}
+                              </span>
+                              <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">
+                                {exam.field}
+                              </span>
+                              <span>{new Date(exam.date).toLocaleDateString('tr-TR')}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center space-x-4">
+                        <div className="text-right">
+                          <div className="text-2xl font-bold text-gray-900">
+                            {exam.score}%
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {exam.correctAnswers}/{exam.totalQuestions} doğru
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => viewExam(exam)}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
+                            title="Detayları Görüntüle"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => toggleExamAnalysis(exam.id, exam.isAnalyzed || false)}
+                            className={`p-2 rounded-lg ${
+                              exam.isAnalyzed 
+                                ? 'text-green-600 hover:bg-green-50' 
+                                : 'text-gray-400 hover:bg-gray-50'
+                            }`}
+                            title={exam.isAnalyzed ? 'Analizi Kapat' : 'Analizi Aç'}
+                          >
+                            <BarChart3 className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => deleteExam(exam.id)}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                            title="Denemeyi Sil"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Diğer sekmeler için geliştirme mesajı */}
+      {activeTab !== 'overview' && activeTab !== 'studyProgram' && activeTab !== 'studentManagement' && activeTab !== 'topicTracking' && activeTab !== 'exams' && (
         <div className="card">
           <div className="text-center py-12">
             <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -2733,7 +3467,6 @@ const TeacherDashboard: React.FC = () => {
             </div>
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Bu Sekme Geliştiriliyor</h3>
             <p className="text-gray-600 mb-4">
-              {activeTab === 'exams' && 'Deneme yönetimi özellikleri yakında eklenecek.'}
               {activeTab === 'examAnalysis' && 'Deneme analizi özellikleri yakında eklenecek.'}
               {activeTab === 'questionTracking' && 'Soru takibi özellikleri yakında eklenecek.'}
               {activeTab === 'analytics' && 'Analiz özellikleri yakında eklenecek.'}
@@ -2791,15 +3524,16 @@ const TeacherDashboard: React.FC = () => {
                   className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
                 >
                   <option value="">Seçiniz</option>
-                  <option value="Matematik">Matematik</option>
-                  <option value="Fizik">Fizik</option>
-                  <option value="Kimya">Kimya</option>
-                  <option value="Biyoloji">Biyoloji</option>
-                  <option value="Türkçe">Türkçe</option>
-                  <option value="Tarih">Tarih</option>
-                  <option value="Coğrafya">Coğrafya</option>
-                  <option value="Felsefe">Felsefe</option>
-                  <option value="İngilizce">İngilizce</option>
+                  <option value="matematik">Matematik</option>
+                  <option value="fizik">Fizik</option>
+                  <option value="kimya">Kimya</option>
+                  <option value="biyoloji">Biyoloji</option>
+                  <option value="turkce">Türkçe</option>
+                  <option value="tarih">Tarih</option>
+                  <option value="cografya">Coğrafya</option>
+                  <option value="felsefe">Felsefe</option>
+                  <option value="ingilizce">İngilizce</option>
+                  <option value="diger">Diğer</option>
                 </select>
               </div>
               <div>
@@ -3459,6 +4193,1077 @@ const TeacherDashboard: React.FC = () => {
                   }
                   return null;
                 })()}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Haftalık Düzenleme Modal */}
+      {showWeeklyEditModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-blue-500 to-purple-500 text-white p-6 flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold">
+                    📅 Haftalık Program Düzenleme
+                  </h2>
+                  <p className="text-blue-100 mt-1">
+                    {selectedStudent?.name} için {getStartOfWeek(selectedWeek).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })} - {new Date(getStartOfWeek(selectedWeek).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowWeeklyEditModal(false)}
+                  className="text-white hover:text-blue-100 transition-colors"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 overflow-y-auto flex-1">
+              {/* Gün Sekmeleri */}
+              <div className="flex space-x-1 mb-6 bg-gray-100 rounded-lg p-1">
+                {['pazartesi', 'sali', 'carsamba', 'persembe', 'cuma', 'cumartesi', 'pazar'].map((day, index) => {
+                  const dayName = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'][index];
+                  return (
+                    <button
+                      key={day}
+                      onClick={() => setSelectedEditDay(day)}
+                      className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                        selectedEditDay === day
+                          ? 'bg-white text-blue-600 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      {dayName}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Seçili Günün Aktiviteleri */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      {['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'][['pazartesi', 'sali', 'carsamba', 'persembe', 'cuma', 'cumartesi', 'pazar'].indexOf(selectedEditDay)]} Aktiviteleri
+                    </h3>
+                    <p className="text-sm text-gray-500 mt-1">
+                      <span className="text-red-500">*</span> Ders seçimi zorunludur
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => addActivityToWeeklyEdit(selectedEditDay)}
+                    className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>Yeni Aktivite</span>
+                  </button>
+                </div>
+
+                {/* Ders Seçimi Uyarısı */}
+                {(() => {
+                  const emptyActivities = getEmptySubjectActivities();
+                  if (emptyActivities.length > 0) {
+                    return (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                        <div className="flex items-center">
+                          <div className="flex-shrink-0">
+                            <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                            </svg>
+                          </div>
+                          <div className="ml-3">
+                            <h3 className="text-sm font-medium text-yellow-800">
+                              Ders Seçimi Eksik
+                            </h3>
+                            <div className="mt-2 text-sm text-yellow-700">
+                              <p>Aşağıdaki aktiviteler için ders seçimi yapılmamış:</p>
+                              <ul className="mt-1 list-disc list-inside">
+                                {emptyActivities.map((item, index) => (
+                                  <li key={index}>
+                                    <span className="font-medium">{item.dayName}</span> gününde aktivite #{item.activityId.slice(-4)}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
+                {/* Aktiviteler Listesi */}
+                <div className="space-y-3">
+                  {(weeklyEditData[selectedEditDay] || []).map((activity: any, index: number) => (
+                    <div key={activity.id} className={`rounded-lg p-4 border ${
+                      !activity.subject ? 'bg-red-50 border-red-200' : 'bg-gray-50'
+                    }`}>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        {/* Ders */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Ders <span className="text-red-500">*</span>
+                            {!activity.subject && (
+                              <span className="ml-2 text-xs text-red-500 font-medium">(Zorunlu)</span>
+                            )}
+                          </label>
+                          <select
+                            value={activity.subject}
+                            onChange={(e) => updateActivityInWeeklyEdit(selectedEditDay, activity.id, 'subject', e.target.value)}
+                            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 ${
+                              !activity.subject 
+                                ? 'border-red-300 focus:ring-red-500 bg-red-50' 
+                                : 'border-gray-300 focus:ring-blue-500'
+                            }`}
+                          >
+                            <option value="">Ders seçin</option>
+                            <option value="matematik">Matematik</option>
+                            <option value="fizik">Fizik</option>
+                            <option value="kimya">Kimya</option>
+                            <option value="biyoloji">Biyoloji</option>
+                            <option value="turkce">Türkçe</option>
+                            <option value="tarih">Tarih</option>
+                            <option value="cografya">Coğrafya</option>
+                            <option value="felsefe">Felsefe</option>
+                            <option value="ingilizce">İngilizce</option>
+                            <option value="diger">Diğer</option>
+                          </select>
+                        </div>
+
+                        {/* Aktivite Tipi */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Tip</label>
+                          <select
+                            value={activity.type}
+                            onChange={(e) => updateActivityInWeeklyEdit(selectedEditDay, activity.id, 'type', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="konu">Konu Çalışması</option>
+                            <option value="test">Test</option>
+                            <option value="deneme">Deneme</option>
+                            <option value="tekrar">Tekrar</option>
+                            <option value="analiz">Analiz</option>
+                          </select>
+                        </div>
+
+                        {/* Süre */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Süre</label>
+                          <input
+                            type="text"
+                            value={activity.time}
+                            onChange={(e) => updateActivityInWeeklyEdit(selectedEditDay, activity.id, 'time', e.target.value)}
+                            placeholder="09:00"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+
+                        {/* İşlemler */}
+                        <div className="flex items-end">
+                          <button
+                            onClick={() => deleteActivityFromWeeklyEdit(selectedEditDay, activity.id)}
+                            className="w-full bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-md transition-colors"
+                          >
+                            <Trash2 className="h-4 w-4 mx-auto" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Konu */}
+                      <div className="mt-3">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Konu</label>
+                        <input
+                          type="text"
+                          value={activity.topic}
+                          onChange={(e) => updateActivityInWeeklyEdit(selectedEditDay, activity.id, 'topic', e.target.value)}
+                          placeholder="Konu başlığı"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Boş Durum */}
+                  {(weeklyEditData[selectedEditDay] || []).length === 0 && (
+                    <div className="text-center py-8 text-gray-500">
+                      <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                      <p>Bu gün için henüz aktivite eklenmemiş</p>
+                      <button
+                        onClick={() => addActivityToWeeklyEdit(selectedEditDay)}
+                        className="text-blue-600 text-sm mt-1 hover:text-blue-700"
+                      >
+                        İlk aktiviteyi ekleyin
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-gray-50 px-6 py-4 border-t flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => setShowWeeklyEditModal(false)}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
+                >
+                  İptal
+                </button>
+                <button
+                  onClick={saveWeeklyEdit}
+                  className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg transition-colors"
+                >
+                  Kaydet
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hafta Temizleme Onay Modal */}
+      {showCleanupConfirmModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-red-500 to-red-600 text-white p-6 rounded-t-xl">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="bg-white bg-opacity-20 rounded-full p-2">
+                    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold">
+                      🧹 Hafta Temizleme
+                    </h2>
+                    <p className="text-red-100 text-sm mt-1">
+                      Bu işlem geri alınamaz!
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowCleanupConfirmModal(false)}
+                  className="text-white hover:text-red-100 transition-colors"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6">
+              <div className="text-center">
+                <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
+                  <svg className="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  Bu haftayı temizlemek istediğinizden emin misiniz?
+                </h3>
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+                  <div className="flex items-center">
+                    <svg className="h-5 w-5 text-yellow-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    <span className="text-sm text-yellow-800 font-medium">
+                      {(() => {
+                        const weekStart = getStartOfWeek(selectedWeek);
+                        const weekEnd = new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
+                        return `${weekStart.toLocaleDateString('tr-TR')} - ${weekEnd.toLocaleDateString('tr-TR')}`;
+                      })()} tarih aralığındaki tüm programlar silinecek.
+                    </span>
+                  </div>
+                </div>
+                <p className="text-sm text-gray-500">
+                  Bu işlem geri alınamaz ve tüm haftalık program verileri kalıcı olarak silinecektir.
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-gray-50 px-6 py-4 rounded-b-xl">
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => setShowCleanupConfirmModal(false)}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors font-medium"
+                >
+                  İptal
+                </button>
+                <button
+                  onClick={confirmCleanupCurrentWeek}
+                  className="bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-lg transition-colors font-medium flex items-center space-x-2"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  <span>Evet, Temizle</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Öğrenci Silme Onay Modal */}
+      {showDeleteConfirmModal && editingStudent && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-red-500 to-red-600 text-white p-6 rounded-t-xl">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="bg-white bg-opacity-20 rounded-full p-2">
+                    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold">
+                      🗑️ Öğrenci Silme
+                    </h2>
+                    <p className="text-red-100 text-sm mt-1">
+                      Bu işlem geri alınamaz!
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowDeleteConfirmModal(false);
+                    setEditingStudent(null);
+                  }}
+                  className="text-white hover:text-red-100 transition-colors"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6">
+              <div className="text-center">
+                <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
+                  <svg className="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  {editingStudent.name} adlı öğrenciyi silmek istediğinizden emin misiniz?
+                </h3>
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+                  <div className="flex items-center">
+                    <svg className="h-5 w-5 text-yellow-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    <span className="text-sm text-yellow-800 font-medium">
+                      Bu işlem geri alınamaz ve aşağıdaki veriler tamamen silinir:
+                    </span>
+                  </div>
+                  <ul className="mt-2 text-sm text-yellow-700 list-disc list-inside">
+                    <li>Öğrenci hesabı ve tüm bilgileri</li>
+                    <li>Haftalık programları</li>
+                    <li>Deneme sonuçları</li>
+                    <li>Aktivite geçmişi</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-gray-50 px-6 py-4 rounded-b-xl">
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => {
+                    setShowDeleteConfirmModal(false);
+                    setEditingStudent(null);
+                  }}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors font-medium"
+                >
+                  İptal
+                </button>
+                <button
+                  onClick={confirmDeleteStudent}
+                  className="bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-lg transition-colors font-medium flex items-center space-x-2"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  <span>Evet, Sil</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Deneme Ekleme Modal */}
+      {showExamModal && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center pt-8 pb-8 overflow-y-auto z-[9999] backdrop-blur-sm"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              closeExamModal();
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              closeExamModal();
+            }
+          }}
+        >
+          <div className="bg-white rounded-lg shadow-xl max-w-[600px] w-full max-h-[85vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">Yeni Deneme Ekle</h3>
+                <button
+                  onClick={closeExamModal}
+                  className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+                >
+                  <XCircle className="h-6 w-6" />
+                </button>
+              </div>
+            <form onSubmit={addExam} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Deneme Adı</label>
+                <input
+                  type="text"
+                  value={examForm.name}
+                  onChange={(e) => handleExamFormInput('name', e.target.value)}
+                  onFocus={(e) => e.target.select()}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Örn: TYT Deneme 1"
+                  required
+                />
+              </div>
+              <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Deneme Türü</label>
+                <select
+                  value={examForm.type}
+                      onChange={(e) => handleExamFormInput('type', e.target.value as 'TYT' | 'AYT')}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                >
+                  <option value="TYT">TYT</option>
+                  <option value="AYT">AYT</option>
+                </select>
+              </div>
+                </div>
+
+                {examForm.type === 'AYT' && (
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Alan</label>
+                  <select
+                      value={examForm.field}
+                      onChange={(e) => handleExamFormInput('field', e.target.value as 'MF' | 'TM' | 'TS' | 'DİL')}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  >
+                      <option value="MF">MF (Sayısal - Matematik-Fen)</option>
+                      <option value="TM">TM (Eşit Ağırlık - Türkçe-Matematik)</option>
+                      <option value="TS">TS (Sözel - Türkçe-Sosyal)</option>
+                      <option value="DİL">DİL (Yabancı Dil)</option>
+                  </select>
+                </div>
+              )}
+
+              {/* AYT Alan Bazlı Ders Girişi */}
+              {examForm.type === 'AYT' && examForm.field && (
+                <div className="space-y-6">
+                  <h4 className="font-medium text-gray-900">
+                    AYT {examForm.field} Alan Ders Bazlı Giriş
+                    {examForm.field === 'MF' && ' (Toplam 80 soru)'}
+                    {examForm.field === 'TM' && ' (Toplam 80 soru)'}
+                    {examForm.field === 'TS' && ' (Toplam 80 soru)'}
+                    {examForm.field === 'DİL' && ' (Toplam 80 soru)'}
+                  </h4>
+                  
+                  <div className="space-y-4">
+                                         {examForm.field === 'MF' && (
+                       <>
+                         {[
+                           { key: 'matematik', label: 'AYT Matematik', total: 40 },
+                           { key: 'fizik', label: 'Fizik', total: 14 },
+                           { key: 'kimya', label: 'Kimya', total: 13 },
+                           { key: 'biyoloji', label: 'Biyoloji', total: 13 }
+                         ].map((subject) => (
+                          <div key={subject.key} className="grid grid-cols-3 gap-3">
+                            <label className="text-sm font-medium text-gray-700">{subject.label}</label>
+                            <input
+                              type="number"
+                              min="0"
+                              max={subject.total}
+                              value={examForm.aytDetails.MF[subject.key as keyof typeof examForm.aytDetails.MF].correct || ''}
+                              onChange={(e) => {
+                                handleAytInput('MF', subject.key, 'correct', e.target.value);
+                              }}
+                              onFocus={(e) => e.target.select()}
+                              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="Doğru"
+                            />
+                            <input
+                              type="number"
+                              min="0"
+                              max={subject.total}
+                              value={examForm.aytDetails.MF[subject.key as keyof typeof examForm.aytDetails.MF].wrong || ''}
+                              onChange={(e) => {
+                                handleAytInput('MF', subject.key, 'wrong', e.target.value);
+                              }}
+                              onFocus={(e) => e.target.select()}
+                              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="Yanlış"
+                            />
+                          </div>
+                        ))}
+                        {(() => {
+                          const totals = calculateAytTotals('MF');
+                          return (
+                            <div className="p-3 bg-blue-50 rounded-lg border">
+                              <div className="grid grid-cols-4 gap-4 text-sm">
+                                <div className="text-center">
+                                  <span className="font-medium text-blue-800">Toplam Doğru</span>
+                                  <div className="text-lg font-bold text-blue-900">{totals.totalCorrect}</div>
+                                </div>
+                                <div className="text-center">
+                                  <span className="font-medium text-red-800">Toplam Yanlış</span>
+                                  <div className="text-lg font-bold text-red-900">{totals.totalWrong}</div>
+                                </div>
+                                <div className="text-center">
+                                  <span className="font-medium text-green-800">Net</span>
+                                  <div className="text-lg font-bold text-green-900">{totals.net.toFixed(2)}</div>
+                                </div>
+                                <div className="text-center">
+                                  <span className="font-medium text-gray-800">Toplam Soru</span>
+                                  <div className="text-lg font-bold text-gray-900">{totals.totalQuestions}</div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </>
+                    )}
+
+                                         {examForm.field === 'TM' && (
+                       <>
+                         {[
+                           { key: 'matematik', label: 'AYT Matematik', total: 40 },
+                           { key: 'turkce', label: 'Türk Dili ve Edebiyatı', total: 24 },
+                           { key: 'tarih', label: 'Tarih-1', total: 10 },
+                           { key: 'cografya', label: 'Coğrafya-1', total: 6 }
+                         ].map((subject) => (
+                          <div key={subject.key} className="grid grid-cols-3 gap-3">
+                            <label className="text-sm font-medium text-gray-700">{subject.label}</label>
+                            <input
+                              type="number"
+                              min="0"
+                              max={subject.total}
+                              value={examForm.aytDetails.TM[subject.key as keyof typeof examForm.aytDetails.TM].correct || ''}
+                              onChange={(e) => {
+                                handleAytInput('TM', subject.key, 'correct', e.target.value);
+                              }}
+                              onFocus={(e) => e.target.select()}
+                              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="Doğru"
+                            />
+                            <input
+                              type="number"
+                              min="0"
+                              max={subject.total}
+                              value={examForm.aytDetails.TM[subject.key as keyof typeof examForm.aytDetails.TM].wrong || ''}
+                              onChange={(e) => {
+                                handleAytInput('TM', subject.key, 'wrong', e.target.value);
+                              }}
+                              onFocus={(e) => e.target.select()}
+                              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="Yanlış"
+                            />
+                          </div>
+                        ))}
+                        {(() => {
+                          const totals = calculateAytTotals('TM');
+                          return (
+                            <div className="p-3 bg-blue-50 rounded-lg border">
+                              <div className="grid grid-cols-4 gap-4 text-sm">
+                                <div className="text-center">
+                                  <span className="font-medium text-blue-800">Toplam Doğru</span>
+                                  <div className="text-lg font-bold text-blue-900">{totals.totalCorrect}</div>
+                                </div>
+                                <div className="text-center">
+                                  <span className="font-medium text-red-800">Toplam Yanlış</span>
+                                  <div className="text-lg font-bold text-red-900">{totals.totalWrong}</div>
+                                </div>
+                                <div className="text-center">
+                                  <span className="font-medium text-green-800">Net</span>
+                                  <div className="text-lg font-bold text-green-900">{totals.net.toFixed(2)}</div>
+                                </div>
+                                <div className="text-center">
+                                  <span className="font-medium text-gray-800">Toplam Soru</span>
+                                  <div className="text-lg font-bold text-gray-900">{totals.totalQuestions}</div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </>
+                    )}
+
+                                         {examForm.field === 'TS' && (
+                       <>
+                         {[
+                           { key: 'turkce', label: 'Türk Dili ve Edebiyatı', total: 24 },
+                           { key: 'tarih1', label: 'Tarih-1', total: 10 },
+                           { key: 'cografya1', label: 'Coğrafya-1', total: 6 },
+                           { key: 'tarih2', label: 'Tarih-2', total: 11 },
+                           { key: 'cografya2', label: 'Coğrafya-2', total: 11 },
+                           { key: 'felsefe', label: 'Felsefe Grubu', total: 12 },
+                           { key: 'din', label: 'Din Kültürü', total: 6 }
+                         ].map((subject) => (
+                          <div key={subject.key} className="grid grid-cols-3 gap-3">
+                            <label className="text-sm font-medium text-gray-700">{subject.label}</label>
+                            <input
+                              type="number"
+                              min="0"
+                              max={subject.total}
+                              value={examForm.aytDetails.TS[subject.key as keyof typeof examForm.aytDetails.TS].correct || ''}
+                              onChange={(e) => {
+                                handleAytInput('TS', subject.key, 'correct', e.target.value);
+                              }}
+                              onFocus={(e) => e.target.select()}
+                              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="Doğru"
+                            />
+                            <input
+                              type="number"
+                              min="0"
+                              max={subject.total}
+                              value={examForm.aytDetails.TS[subject.key as keyof typeof examForm.aytDetails.TS].wrong || ''}
+                              onChange={(e) => {
+                                handleAytInput('TS', subject.key, 'wrong', e.target.value);
+                              }}
+                              onFocus={(e) => e.target.select()}
+                              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="Yanlış"
+                            />
+                          </div>
+                        ))}
+                        {(() => {
+                          const totals = calculateAytTotals('TS');
+                          return (
+                            <div className="p-3 bg-blue-50 rounded-lg border">
+                              <div className="grid grid-cols-4 gap-4 text-sm">
+                                <div className="text-center">
+                                  <span className="font-medium text-blue-800">Toplam Doğru</span>
+                                  <div className="text-lg font-bold text-blue-900">{totals.totalCorrect}</div>
+                                </div>
+                                <div className="text-center">
+                                  <span className="font-medium text-red-800">Toplam Yanlış</span>
+                                  <div className="text-lg font-bold text-red-900">{totals.totalWrong}</div>
+                                </div>
+                                <div className="text-center">
+                                  <span className="font-medium text-green-800">Net</span>
+                                  <div className="text-lg font-bold text-green-900">{totals.net.toFixed(2)}</div>
+                                </div>
+                                <div className="text-center">
+                                  <span className="font-medium text-gray-800">Toplam Soru</span>
+                                  <div className="text-lg font-bold text-gray-900">{totals.totalQuestions}</div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </>
+                    )}
+
+                    {examForm.field === 'DİL' && (
+                      <>
+                        {[
+                          { key: 'ingilizce', label: 'İngilizce', total: 80 }
+                        ].map((subject) => (
+                          <div key={subject.key} className="grid grid-cols-3 gap-3">
+                            <label className="text-sm font-medium text-gray-700">{subject.label}</label>
+                            <input
+                              type="number"
+                              min="0"
+                              max={subject.total}
+                              value={examForm.aytDetails.DİL[subject.key as keyof typeof examForm.aytDetails.DİL].correct || ''}
+                              onChange={(e) => {
+                                handleAytInput('DİL', subject.key, 'correct', e.target.value);
+                              }}
+                              onFocus={(e) => e.target.select()}
+                              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="Doğru"
+                            />
+                            <input
+                              type="number"
+                              min="0"
+                              max={subject.total}
+                              value={examForm.aytDetails.DİL[subject.key as keyof typeof examForm.aytDetails.DİL].wrong || ''}
+                              onChange={(e) => {
+                                handleAytInput('DİL', subject.key, 'wrong', e.target.value);
+                              }}
+                              onFocus={(e) => e.target.select()}
+                              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="Yanlış"
+                            />
+                          </div>
+                        ))}
+                        {(() => {
+                          const totals = calculateAytTotals('DİL');
+                          return (
+                            <div className="p-3 bg-blue-50 rounded-lg border">
+                              <div className="grid grid-cols-4 gap-4 text-sm">
+                                <div className="text-center">
+                                  <span className="font-medium text-blue-800">Toplam Doğru</span>
+                                  <div className="text-lg font-bold text-blue-900">{totals.totalCorrect}</div>
+                                </div>
+                                <div className="text-center">
+                                  <span className="font-medium text-red-800">Toplam Yanlış</span>
+                                  <div className="text-lg font-bold text-red-900">{totals.totalWrong}</div>
+                                </div>
+                                <div className="text-center">
+                                  <span className="font-medium text-green-800">Net</span>
+                                  <div className="text-lg font-bold text-green-900">{totals.net.toFixed(2)}</div>
+                                </div>
+                                <div className="text-center">
+                                  <span className="font-medium text-gray-800">Toplam Soru</span>
+                                  <div className="text-lg font-bold text-gray-900">{totals.totalQuestions}</div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Tarih</label>
+                <input
+                  type="date"
+                  value={examForm.date}
+                  onChange={(e) => handleExamFormInput('date', e.target.value)}
+                  onFocus={(e) => e.target.select()}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+                                 {examForm.type === 'TYT' && (
+                   <div className="space-y-6">
+                     <h4 className="font-medium text-gray-900">TYT Ders Bazlı Giriş (Toplam 120 soru)</h4>
+                     
+                     {/* Türkçe ve Matematik */}
+                     <div className="space-y-4">
+                       <h5 className="font-medium text-gray-800">Ana Dersler</h5>
+                       {[
+                         { key: 'turkce', label: 'Türkçe', total: 40 },
+                         { key: 'matematik', label: 'Temel Matematik', total: 40 }
+                       ].map((subject) => (
+                         <div key={subject.key} className="grid grid-cols-3 gap-3">
+                           <label className="text-sm font-medium text-gray-700">{subject.label}</label>
+                           <input
+                             type="number"
+                             min="0"
+                             max={subject.total}
+                             value={examForm.tytDetails[subject.key as 'turkce' | 'matematik'].correct || ''}
+                             onChange={(e) => {
+                               handleTytInput(subject.key, 'correct', e.target.value);
+                             }}
+                             onFocus={(e) => e.target.select()}
+                             className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                             placeholder="Doğru"
+                           />
+                           <input
+                             type="number"
+                             min="0"
+                             max={subject.total}
+                             value={examForm.tytDetails[subject.key as 'turkce' | 'matematik'].wrong || ''}
+                             onChange={(e) => {
+                               handleTytInput(subject.key, 'wrong', e.target.value);
+                             }}
+                             onFocus={(e) => e.target.select()}
+                             className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                             placeholder="Yanlış"
+                           />
+                         </div>
+                       ))}
+                     </div>
+
+                     {/* Fen Bilimleri Alt Dersleri */}
+                     <div className="space-y-4">
+                       <h5 className="font-medium text-gray-800">Fen Bilimleri (Toplam 20 soru)</h5>
+                       {[
+                         { key: 'fizik', label: 'Fizik', total: 7 },
+                         { key: 'kimya', label: 'Kimya', total: 7 },
+                         { key: 'biyoloji', label: 'Biyoloji', total: 6 }
+                       ].map((subject) => (
+                         <div key={subject.key} className="grid grid-cols-3 gap-3 ml-4">
+                           <label className="text-sm font-medium text-gray-700">{subject.label}</label>
+                           <input
+                             type="number"
+                             min="0"
+                             max={subject.total}
+                             value={examForm.tytDetails.fen[subject.key as 'fizik' | 'kimya' | 'biyoloji'].correct || ''}
+                             onChange={(e) => {
+                               handleTytFenInput(subject.key, 'correct', e.target.value);
+                             }}
+                             onFocus={(e) => e.target.select()}
+                             className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                             placeholder="Doğru"
+                           />
+                           <input
+                             type="number"
+                             min="0"
+                             max={subject.total}
+                             value={examForm.tytDetails.fen[subject.key as 'fizik' | 'kimya' | 'biyoloji'].wrong || ''}
+                             onChange={(e) => {
+                               handleTytFenInput(subject.key, 'wrong', e.target.value);
+                             }}
+                             onFocus={(e) => e.target.select()}
+                             className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                             placeholder="Yanlış"
+                           />
+                         </div>
+                       ))}
+                       <div className="ml-4 p-2 bg-blue-50 rounded border">
+                         <span className="text-sm font-medium text-blue-800">
+                           Fen Toplam: {examForm.tytDetails.fen.total.correct} doğru, {examForm.tytDetails.fen.total.wrong} yanlış
+                         </span>
+                       </div>
+                     </div>
+
+                     {/* Sosyal Bilimler Alt Dersleri */}
+                     <div className="space-y-4">
+                       <h5 className="font-medium text-gray-800">Sosyal Bilimler (Toplam 20 soru)</h5>
+                       {[
+                         { key: 'tarih', label: 'Tarih', total: 5 },
+                         { key: 'cografya', label: 'Coğrafya', total: 5 },
+                         { key: 'felsefe', label: 'Felsefe', total: 5 },
+                         { key: 'din', label: 'Din Kültürü', total: 5 }
+                       ].map((subject) => (
+                         <div key={subject.key} className="grid grid-cols-3 gap-3 ml-4">
+                           <label className="text-sm font-medium text-gray-700">{subject.label}</label>
+                           <input
+                             type="number"
+                             min="0"
+                             max={subject.total}
+                             value={examForm.tytDetails.sosyal[subject.key as 'tarih' | 'cografya' | 'felsefe' | 'din'].correct || ''}
+                             onChange={(e) => {
+                               handleTytSosyalInput(subject.key, 'correct', e.target.value);
+                             }}
+                             onFocus={(e) => e.target.select()}
+                             className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                             placeholder="Doğru"
+                           />
+                           <input
+                             type="number"
+                             min="0"
+                             max={subject.total}
+                             value={examForm.tytDetails.sosyal[subject.key as 'tarih' | 'cografya' | 'felsefe' | 'din'].wrong || ''}
+                             onChange={(e) => {
+                               handleTytSosyalInput(subject.key, 'wrong', e.target.value);
+                             }}
+                             onFocus={(e) => e.target.select()}
+                             className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                             placeholder="Yanlış"
+                           />
+                         </div>
+                       ))}
+                       <div className="ml-4 p-2 bg-green-50 rounded border">
+                         <span className="text-sm font-medium text-green-800">
+                           Sosyal Toplam: {examForm.tytDetails.sosyal.total.correct} doğru, {examForm.tytDetails.sosyal.total.wrong} yanlış
+                         </span>
+                       </div>
+                     </div>
+                     
+                     {/* TYT Genel Toplam */}
+                     {(() => {
+                       const totals = calculateTytTotals();
+                       return (
+                         <div className="p-4 bg-purple-50 rounded-lg border">
+                           <h5 className="font-medium text-purple-800 mb-3 text-center">TYT Genel Toplam</h5>
+                           <div className="grid grid-cols-4 gap-4 text-sm">
+                             <div className="text-center">
+                               <span className="font-medium text-blue-800">Toplam Doğru</span>
+                               <div className="text-lg font-bold text-blue-900">{totals.totalCorrect}</div>
+                             </div>
+                             <div className="text-center">
+                               <span className="font-medium text-red-800">Toplam Yanlış</span>
+                               <div className="text-lg font-bold text-red-900">{totals.totalWrong}</div>
+                             </div>
+                             <div className="text-center">
+                               <span className="font-medium text-green-800">Net</span>
+                               <div className="text-lg font-bold text-green-900">{totals.net.toFixed(2)}</div>
+                             </div>
+                             <div className="text-center">
+                               <span className="font-medium text-gray-800">Toplam Soru</span>
+                               <div className="text-lg font-bold text-gray-900">{totals.totalQuestions}</div>
+                             </div>
+                           </div>
+                         </div>
+                       );
+                     })()}
+                   </div>
+                )}
+
+
+                
+                <div className="flex space-x-3">
+                  <button type="submit" className="btn-primary flex-1">Deneme Ekle</button>
+                  <button
+                    type="button"
+                    onClick={closeExamModal}
+                    className="btn-secondary flex-1"
+                  >
+                    İptal
+                  </button>
+              </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Deneme Görüntüleme Modal */}
+      {showExamViewModal && selectedExam && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold mb-4">
+              Deneme Analizi
+            </h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Deneme Adı
+                </label>
+                <p>{selectedExam.name}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Deneme Türü
+                </label>
+                <p>{selectedExam.type}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Deneme Alanı
+                </label>
+                <p>{selectedExam.field}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Tarih
+                </label>
+                <p>{new Date(selectedExam.date).toLocaleDateString('tr-TR')}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Doğru Sayısı
+                </label>
+                <p>{selectedExam.correctAnswers}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Yanlış Sayısı
+                </label>
+                <p>{selectedExam.wrongAnswers}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Toplam Soru Sayısı
+                </label>
+                <p>{selectedExam.totalQuestions}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Puan
+                </label>
+                <p>{selectedExam.score}%</p>
+              </div>
+
+              {examForm.type === 'TYT' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Türkçe
+                    </label>
+                    <p>{examForm.tytDetails.turkce.correct}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Matematik
+                    </label>
+                    <p>{examForm.tytDetails.matematik.correct}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Fen Bilimleri
+                    </label>
+                    <p>{examForm.tytDetails.fen.total.correct}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Sosyal Bilimler
+                    </label>
+                    <p>{examForm.tytDetails.sosyal.total.correct}</p>
+                  </div>
+                </>
+              )}
+
+              {examForm.type === 'AYT' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Matematik
+                    </label>
+                    <p>{examForm.aytDetails.MF.matematik.correct}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Fizik
+                    </label>
+                    <p>{examForm.aytDetails.MF.fizik.correct}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Kimya
+                    </label>
+                    <p>{examForm.aytDetails.MF.kimya.correct}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Biyoloji
+                    </label>
+                    <p>{examForm.aytDetails.MF.biyoloji.correct}</p>
+                  </div>
+                </>
+              )}
+
+              <div className="flex justify-end space-x-3 mt-6">
+                <button 
+                  onClick={() => setShowExamViewModal(false)}
+                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                >
+                  Kapat
+                </button>
               </div>
             </div>
           </div>

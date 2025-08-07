@@ -1,0 +1,37 @@
+[33ma7d71aa[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m)[m  Güvenlik rehberi eklendi
+ GUVENLIK_REHBERI.md | 78 [32m+++++++++++++++++++++++++++++++++++++++++++++++++++++[m
+ 1 file changed, 78 insertions(+)
+[33m8bf91c1[m  İlk kayıt: Öğrenci takip sistemi tamamlandı
+ .gitignore                          |    93 [32m+[m
+ README.md                           |   148 [32m+[m
+ createAdmin.js                      |    54 [32m+[m
+ package-lock.json                   | 19333 [32m++++++++++++++++++++++++++++++++++[m
+ package.json                        |    54 [32m+[m
+ postcss.config.js                   |     6 [32m+[m
+ public/_redirects                   |     1 [32m+[m
+ public/index.html                   |    24 [32m+[m
+ public/manifest.json                |    28 [32m+[m
+ src/App.tsx                         |   156 [32m+[m
+ src/components/AdminDashboard.tsx   |  1271 [32m+++[m
+ src/components/Home.tsx             |   224 [32m+[m
+ src/components/Layout.tsx           |   347 [32m+[m
+ src/components/Login.tsx            |   198 [32m+[m
+ src/components/Logo.tsx             |   148 [32m+[m
+ src/components/ParentDashboard.tsx  |   427 [32m+[m
+ src/components/Register.tsx         |   568 [32m+[m
+ src/components/StudentDashboard.tsx |  6005 [32m+++++++++++[m
+ src/components/TeacherDashboard.tsx |  3471 [32m++++++[m
+ src/components/Toast.tsx            |    77 [32m+[m
+ src/contexts/AuthContext.tsx        |   299 [32m+[m
+ src/firebase.ts                     |    26 [32m+[m
+ src/index.css                       |   167 [32m+[m
+ src/index.tsx                       |    17 [32m+[m
+ src/serviceWorker.ts                |   118 [32m+[m
+ src/types/common.ts                 |   175 [32m+[m
+ src/types/index.ts                  |   622 [32m++[m
+ src/utils/errorHandler.ts           |    76 [32m+[m
+ src/utils/logger.ts                 |    33 [32m+[m
+ src/utils/validation.ts             |   169 [32m+[m
+ tailwind.config.js                  |    61 [32m+[m
+ tsconfig.json                       |    26 [32m+[m
+ 32 files changed, 34422 insertions(+)
