@@ -416,12 +416,12 @@ export interface StudentStats {
 export const PACKAGES: Package[] = [
   {
     type: 'trial',
-    name: '24 Saat Deneme',
-    studentLimit: 3,
+    name: '3 Günlük Deneme',
+    studentLimit: 5,
     price: 0,
     features: [
-      '3 Öğrenci',
-      '24 Saat Geçerli',
+      '5 Öğrenci',
+      '3 Gün Geçerli',
       'Tüm Özellikler',
       'Otomatik İptal'
     ]

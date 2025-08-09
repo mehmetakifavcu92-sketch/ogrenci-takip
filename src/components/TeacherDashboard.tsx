@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { collection, query, where, getDocs, updateDoc, doc, addDoc, deleteDoc, onSnapshot, setDoc } from 'firebase/firestore';
+import { usePresence } from '../contexts/PresenceContext';
 import { db } from '../firebase';
 import { Task, Exam, YKS_TOPICS, TopicProgress, StudySession, ResourceBook, CustomTopic, QuestionSession, ExamAnalysis, StudyActivity, StudentMetrics, ChartDataPoint } from '../types';
 import { 
@@ -40,6 +41,7 @@ import Toast from './Toast';
 const TeacherDashboard: React.FC = () => {
   const { userData, currentUser, createUserSilently } = useAuth();
   const [students, setStudents] = useState<any[]>([]);
+  const { userStatus } = usePresence();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
   const [questionTracking, setQuestionTracking] = useState<any[]>([]);
@@ -127,7 +129,7 @@ const TeacherDashboard: React.FC = () => {
     type: 'success',
     isVisible: false
   });
-  const [activeTab, setActiveTab] = useState<'overview' | 'studyProgram' | 'studentManagement' | 'topicTracking' | 'exams' | 'questionTracking' | 'analytics' | 'charts' | 'examAnalysis'>('overview');
+  const [activeTab, setActiveTab] = useState<'studyProgram' | 'studentManagement' | 'topicTracking' | 'exams' | 'questionTracking' | 'analytics' | 'charts' | 'examAnalysis'>('studyProgram');
   const [selectedSubject, setSelectedSubject] = useState<string>('');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('');
   const [showTopicsModal, setShowTopicsModal] = useState(false);
@@ -810,6 +812,22 @@ const TeacherDashboard: React.FC = () => {
     return () => document.removeEventListener('keydown', handleEscapeKey);
   }, [showAddActivityModal, showAddStudentModal, showAddParentModal, showEditStudentModal, showCustomTopicModal]);
 
+  // students listesi güncellenince, seçili öğrenci listede yoksa seçimi düzelt
+  useEffect(() => {
+    if (!selectedStudent) return;
+    const exists = students.some(s => s.id === selectedStudent.id);
+    if (!exists) {
+      // Listede ilk uygun öğrenciyi seç, yoksa null yap
+      if (students.length > 0) {
+        setSelectedStudent(students[0]);
+        try { localStorage.setItem('teacher_selected_student', JSON.stringify(students[0])); } catch {}
+      } else {
+        setSelectedStudent(null);
+        try { localStorage.removeItem('teacher_selected_student'); } catch {}
+      }
+    }
+  }, [students]);
+
   const loadTeacherData = async () => {
     try {
       setLoading(true);
@@ -819,35 +837,24 @@ const TeacherDashboard: React.FC = () => {
         return;
       }
 
-      // Öğretmenin öğrencilerini çek
-      const studentsQuery = query(
+      // Öğretmenin öğrencilerini gerçek zamanlı dinle
+      const studentsQueryRef = query(
         collection(db, 'users'),
         where('role', '==', 'student'),
         where('teacherId', '==', userData.id)
       );
-      const studentsSnapshot = await getDocs(studentsQuery);
-      const studentsData = studentsSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate ? doc.data().createdAt.toDate() : new Date(doc.data().createdAt),
-        lastActivity: doc.data().lastActivity?.toDate ? doc.data().lastActivity.toDate() : null
-      }));
-      console.log('Loaded students:', studentsData);
-      console.log('🔍 Öğrencilerin teacherId kontrol:', studentsData.map(s => ({
-        name: (s as any).name,
-        id: s.id,
-        teacherId: (s as any).teacherId,
-        currentTeacherId: userData.id
-      })));
-      setStudents(studentsData);
-
-      // Eğer öğrenci seçili değilse ve öğrenci varsa, ilkini seç
-      if (!selectedStudent && studentsData.length > 0) {
-        setSelectedStudent(studentsData[0]);
-      }
+      const unsubStudents = onSnapshot(studentsQueryRef, (snapshot) => {
+        const liveStudents = snapshot.docs.map(d => ({
+          id: d.id,
+          ...d.data(),
+          createdAt: (d.data() as any).createdAt?.toDate ? (d.data() as any).createdAt.toDate() : new Date((d.data() as any).createdAt),
+          lastActivity: (d.data() as any).lastActivity?.toDate ? (d.data() as any).lastActivity.toDate() : null
+        }));
+        setStudents(liveStudents);
+      });
 
       // Öğrencilerin teacherId'si eksikse düzelt
-      for (const student of studentsData) {
+      for (const student of students) {
         if (!(student as any).teacherId) {
           console.log(`⚠️ Öğrenci ${(student as any).name} teacherId'si eksik, düzeltiliyor...`);
           try {
@@ -862,10 +869,9 @@ const TeacherDashboard: React.FC = () => {
         }
       }
 
-      // Seçili öğrencinin verilerini yükle
-      if (selectedStudent || studentsData.length > 0) {
-        const currentStudent = selectedStudent || studentsData[0];
-        await loadStudentSpecificData(currentStudent.id);
+      // Seçili öğrencinin verilerini yükle (artık otomatik seçim yok)
+      if (selectedStudent) {
+        await loadStudentSpecificData(selectedStudent.id);
       }
 
     } catch (error) {
@@ -1314,11 +1320,16 @@ const TeacherDashboard: React.FC = () => {
 
   const getActivityStatusIcon = (activityId: string) => {
     const status = activityStatuses[activityId] || 'todo';
-    switch(status) {
-      case 'todo': return <Clock className="h-4 w-4 text-gray-500" />;
-      case 'doing': return <Timer className="h-4 w-4 text-yellow-500" />;
-      case 'done': return <CheckCircle className="h-4 w-4 text-green-500" />;
-      default: return <Clock className="h-4 w-4 text-gray-500" />;
+    const wrapperClass = 'bg-white/80 rounded-md p-1 ring-1 ring-black/10';
+    const iconClass = 'h-4 w-4 text-gray-900';
+    switch (status) {
+      case 'doing':
+        return <div className={wrapperClass}><Timer className={iconClass} /></div>;
+      case 'done':
+        return <div className={wrapperClass}><CheckCircle className={iconClass} /></div>;
+      case 'todo':
+      default:
+        return <div className={wrapperClass}><Clock className={iconClass} /></div>;
     }
   };
 
@@ -1546,6 +1557,13 @@ const TeacherDashboard: React.FC = () => {
       
       const deletePromises = programsSnapshot.docs.map(doc => deleteDoc(doc.ref));
       await Promise.all(deletePromises);
+
+      // Yerel state'i anında güncelle (UI'da kalıntı isimleri engelle)
+      setStudents(prevStudents => prevStudents.filter(s => s.id !== editingStudent.id));
+      if (selectedStudent?.id === editingStudent.id) {
+        setSelectedStudent(null);
+        try { localStorage.removeItem('teacher_selected_student'); } catch {}
+      }
 
       showToast(`${editingStudent.name} başarıyla silindi!`, 'success');
       setShowDeleteConfirmModal(false);
@@ -1785,11 +1803,11 @@ const TeacherDashboard: React.FC = () => {
       // createUserSilently fonksiyonunu kullan
       await createUserSilently(studentForm.email, studentForm.password, studentData);
 
-      showToast(`${studentForm.name} başarıyla eklendi! Giriş bilgileri: ${studentForm.username} / ${studentForm.password}`, 'success');
+      showToast(`${studentForm.name} başarıyla eklendi!`, 'success');
       setShowAddStudentModal(false);
       resetStudentForm();
       
-      // Öğrenci listesini yenile
+      // Öğrenci listesini yenile (seçimi koru)
       await loadTeacherData();
     } catch (error: any) {
       console.error('Öğrenci ekleme hatası:', error);
@@ -1868,19 +1886,19 @@ const TeacherDashboard: React.FC = () => {
   // Öğrenci seçiciyi Layout'a mount et
   useEffect(() => {
     const selectorContainer = document.getElementById('teacher-student-selector');
-    if (selectorContainer && students.length > 0) {
-      const selectedStudentData = selectedStudent ? students.find(s => s.id === selectedStudent.id) : students[0];
-      const selectedName = selectedStudentData ? (selectedStudentData as any).name : '';
-      const selectedUsername = selectedStudentData ? (selectedStudentData as any).username : '';
+      if (selectorContainer) {
+        const selectedStudentData = selectedStudent ? students.find(s => s.id === selectedStudent.id) : null;
+        const selectedName = selectedStudentData ? (selectedStudentData as any).name : '';
+        const selectedUsername = selectedStudentData ? (selectedStudentData as any).username : '';
       
       selectorContainer.innerHTML = `
-        <div class="relative">
+          <div class="relative">
           <div class="flex items-center space-x-2 bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer group" id="student-dropdown-trigger">
-            <div class="w-8 h-8 bg-gradient-to-r from-orange-400 to-pink-400 rounded-full flex items-center justify-center shadow-sm">
-              <span class="text-white font-semibold text-sm">${selectedName.charAt(0).toUpperCase()}</span>
+            <div class="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center shadow-sm">
+              <span class="text-gray-400 font-semibold text-sm">${selectedName ? selectedName.charAt(0).toUpperCase() : '?'}</span>
             </div>
             <div class="flex flex-col min-w-0">
-              <span class="text-sm font-medium text-gray-900 truncate">${selectedName}</span>
+              <span class="text-sm font-medium text-gray-900 truncate">${selectedName || 'Öğrenci seçiniz'}</span>
               ${selectedUsername ? `<span class="text-xs text-gray-500 truncate">@${selectedUsername}</span>` : ''}
             </div>
             <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1892,6 +1910,7 @@ const TeacherDashboard: React.FC = () => {
             id="student-selector"
             class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           >
+            <option value="" ${!selectedStudent ? 'selected' : ''} disabled hidden>Öğrenci seçiniz</option>
             ${students.map(student => 
               `<option value="${student.id}" ${selectedStudent?.id === student.id ? 'selected' : ''}>
                 ${(student as any).name} ${(student as any).username ? `(@${(student as any).username})` : ''}
@@ -1901,13 +1920,13 @@ const TeacherDashboard: React.FC = () => {
         </div>
       `;
       
-      // Event listener ekle
+      // Event listener ekle (change)
       const selectElement = document.getElementById('student-selector') as HTMLSelectElement;
       if (selectElement) {
         selectElement.onchange = (e) => {
           const target = e.target as HTMLSelectElement;
           const student = students.find(s => s.id === target.value);
-          setSelectedStudent(student);
+          setSelectedStudent(student || null);
           if (student) {
             loadStudentSpecificData(student.id);
           }
@@ -2309,9 +2328,8 @@ const TeacherDashboard: React.FC = () => {
 
       {/* Tabs */}
       <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-8">
-          {[
-            { id: 'overview', label: 'Ana Sayfa', icon: Home },
+        <nav className="-mb-px flex flex-wrap gap-2 md:space-x-8">
+          {[ 
             { id: 'studyProgram', label: 'Çalışma Programı', icon: BookOpen },
             { id: 'studentManagement', label: 'Öğrenci Yönetimi', icon: User },
             { id: 'exams', label: 'Denemeler', icon: FileText },
@@ -2340,8 +2358,8 @@ const TeacherDashboard: React.FC = () => {
         </nav>
       </div>
 
-      {/* Ana Sayfa Tab */}
-      {activeTab === 'overview' && selectedStudent && (
+      {/* (Kaldırıldı) Ana Sayfa Tab */}
+      {false && (
         <div className="space-y-6">
           {/* Hoş Geldiniz Bölümü */}
           <div className="bg-gradient-to-r from-orange-50 to-red-50 rounded-xl p-6 border border-orange-100">
@@ -2504,33 +2522,59 @@ const TeacherDashboard: React.FC = () => {
       )}
 
       {/* Overview tab öğrenci yoksa */}
-      {activeTab === 'overview' && students.length === 0 && !loading && (
+      {false && students.length === 0 && !loading && (
         <div className="card">
           <div className="text-center py-12">
             <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <GraduationCap className="h-8 w-8 text-yellow-600" />
             </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Öğrenci Ataması Bekleniyor</h3>
-            <p className="text-gray-600 mb-4">
-              Size atanmış öğrenci bulunmuyor. Dashboard'u kullanabilmek için önce öğrenci ataması yapılması gerekiyor.
-            </p>
-            <div className="space-y-2 text-sm text-gray-500">
-              <p>• Yöneticiden öğrenci ataması yapmasını isteyebilirsiniz</p>
-              <p>• Öğrenci atandıktan sonra burada verilerini görebileceksiniz</p>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Henüz öğrenciniz yok</h3>
+            <p className="text-gray-600 mb-4">Aşağıdan hızlıca öğrenci ekleyin veya öğrenci seçin.</p>
+            <div className="mt-2 flex justify-center gap-3">
+              <button onClick={() => setShowAddStudentModal(true)} className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">Öğrenci Ekle</button>
+              <button onClick={() => setActiveTab('studentManagement')} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">Öğrenci Yönetimi</button>
             </div>
           </div>
         </div>
       )}
 
       {/* Haftalık Program Tab */}
+      {activeTab === 'studyProgram' && !selectedStudent && (
+        <div className="card">
+          <div className="text-center py-12">
+            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <GraduationCap className="h-8 w-8 text-blue-600" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Öğrenci Seçilmedi</h3>
+            <p className="text-gray-600 mb-4">
+              Çalışma programını görüntülemek için önce bir öğrenci seçin veya öğrenci ekleyin.
+            </p>
+            <div className="space-y-2 text-sm text-gray-500">
+              <p>• Sağ üstteki öğrenci seçiminden bir öğrenci seçebilirsiniz</p>
+              <p>• Öğrenci listeniz boşsa "Öğrenci Ekle" butonunu kullanabilirsiniz</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'studyProgram' && selectedStudent && (
         <div className="space-y-6">
           {/* Header */}
           <div className="bg-white rounded-xl shadow-sm p-6 border">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-xl font-bold text-gray-900 mb-2">
+                <h2 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
                   📅 {selectedStudent.name} için Haftalık Program
+                  {/* Çevrimiçi rozet */}
+                  {userStatus[selectedStudent.id] && (
+                    <span className={`ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                      userStatus[selectedStudent.id] === 'online' ? 'bg-green-100 text-green-800' :
+                      userStatus[selectedStudent.id] === 'away' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      {userStatus[selectedStudent.id] === 'online' ? 'Çevrimiçi' : userStatus[selectedStudent.id] === 'away' ? 'Uzakta' : 'Çevrimdışı'}
+                    </span>
+                  )}
                 </h2>
                 <p className="text-gray-600">
                   Öğrenciniz için haftalık çalışma programı oluşturun ve yönetin
@@ -2775,7 +2819,12 @@ const TeacherDashboard: React.FC = () => {
           <div className="bg-white rounded-xl shadow-sm border">
             <div className="p-6 border-b">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-gray-900">Öğrencilerim ({students.length})</h3>
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  Öğrencilerim ({students.length})
+                  <span className="text-sm font-normal text-gray-500">
+                    — Çevrimiçi: {students.filter(s => userStatus[s.id] === 'online').length}
+                  </span>
+                </h3>
                 <div className="flex items-center space-x-3">
                   {/* Arama Kutusu */}
                   <div className="relative">
@@ -2837,13 +2886,18 @@ const TeacherDashboard: React.FC = () => {
                       }`}>
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center space-x-3">
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                            <div className={`relative w-10 h-10 rounded-full flex items-center justify-center ${
                               isActive ? 'bg-blue-100' : 'bg-gray-200'
                             }`}>
                               <User className={`h-5 w-5 ${isActive ? 'text-blue-600' : 'text-gray-500'}`} />
+                              <span className={`absolute -right-1 -bottom-1 w-3 h-3 rounded-full ring-2 ring-white ${
+                                userStatus[student.id] === 'online' ? 'bg-green-500' :
+                                userStatus[student.id] === 'away' ? 'bg-yellow-400' :
+                                'bg-gray-300'
+                              }`}></span>
                             </div>
                             <div>
-                              <div className="flex items-center space-x-2">
+                              <div className="flex items-center gap-2">
                                 <h4 className={`font-medium ${isActive ? 'text-gray-900' : 'text-gray-600'}`}>
                                   {(student as any).name}
                                 </h4>
@@ -2854,6 +2908,15 @@ const TeacherDashboard: React.FC = () => {
                                 }`}>
                                   {isActive ? '🟢 Aktif' : '🔴 Pasif'}
                                 </span>
+                                {userStatus[student.id] && (
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                    userStatus[student.id] === 'online' ? 'bg-green-100 text-green-800' :
+                                    userStatus[student.id] === 'away' ? 'bg-yellow-100 text-yellow-800' :
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {userStatus[student.id] === 'online' ? 'Çevrimiçi' : userStatus[student.id] === 'away' ? 'Uzakta' : 'Çevrimdışı'}
+                                  </span>
+                                )}
                               </div>
                               <p className="text-sm text-gray-500">{(student as any).email}</p>
                             </div>
@@ -3470,7 +3533,7 @@ const TeacherDashboard: React.FC = () => {
       )}
 
       {/* Diğer sekmeler için geliştirme mesajı */}
-      {activeTab !== 'overview' && activeTab !== 'studyProgram' && activeTab !== 'studentManagement' && activeTab !== 'topicTracking' && activeTab !== 'exams' && (
+      {activeTab !== 'studyProgram' && activeTab !== 'studentManagement' && activeTab !== 'topicTracking' && activeTab !== 'exams' && (
         <div className="card">
           <div className="text-center py-12">
             <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -3525,7 +3588,13 @@ const TeacherDashboard: React.FC = () => {
             <h3 className="text-lg font-semibold mb-4">
               {editingActivity ? 'Görev Düzenle' : 'Yeni Görev Ekle'}
             </h3>
-            <div className="space-y-4">
+            <div className="space-y-4" onKeyDown={(e) => {
+              if (e.key === 'Enter') addStudent();
+              if (e.key === 'Escape') {
+                setShowAddStudentModal(false);
+                resetStudentForm();
+              }
+            }}>
               {editingActivity && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Gün</label>

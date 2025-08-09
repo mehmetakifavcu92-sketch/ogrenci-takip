@@ -7,8 +7,8 @@ import {
   createUserWithEmailAndPassword
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import { auth, db } from '../firebase';
-import { User, UserRole } from '../types/index';
+import { auth, db, adminAuth } from '../firebase';
+import { User, UserRole, PACKAGES } from '../types/index';
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
@@ -22,6 +22,7 @@ interface AuthContextType {
   createUserSilently: (email: string, password: string, userData: Omit<User, 'id'>) => Promise<void>;
   createUserAndReturn: (email: string, password: string, userData: Omit<User, 'id'>, returnEmail: string, returnPassword: string) => Promise<void>;
   logout: () => Promise<void>;
+  startTeacherTrial: (name: string, username: string, email: string, password: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -136,22 +137,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await setDoc(doc(db, 'users', user.uid), teacherData);
   };
 
+  // Public self-serve teacher 3-day trial registration
+  const startTeacherTrial = async (name: string, username: string, email: string, password: string) => {
+    // Create via primary auth so the user is logged in
+    const { user } = await createUserWithEmailAndPassword(auth, email, password);
+    const trialPkg = PACKAGES.find(p => p.type === 'trial');
+    const now = new Date();
+    const end = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+    const teacherData: User = {
+      id: user.uid,
+      email: user.email || email,
+      name,
+      role: 'teacher',
+      username,
+      createdAt: now,
+      package: 'trial',
+      isTrialActive: true,
+      trialStartDate: now,
+      trialEndDate: end,
+      studentLimit: trialPkg ? trialPkg.studentLimit : 5
+    } as unknown as User;
+    await setDoc(doc(db, 'users', user.uid), teacherData);
+  };
+
   const createUserSilently = async (email: string, password: string, userDataToSave: Omit<User, 'id'>) => {
-    // Mevcut kullanıcının bilgilerini sakla
-    const originalUser = currentUser;
-    const originalUserData = userData;
-    
     try {
-      // AuthChange listener'ını ÖNCEDİN bypass et
-      setBypassAuthChange(true);
-      console.log('🔒 Bypass activated - blocking auth changes');
-      
-      // Küçük bir gecikme ekle ki bypass aktif olsun
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // Yeni kullanıcı oluştur
-      const { user } = await createUserWithEmailAndPassword(auth, email, password);
-      console.log('👤 User created, but bypass is active');
+      // Secondary auth üzerinden kullanıcı oluştur (mevcut oturumu bozmaz)
+      const { user } = await createUserWithEmailAndPassword(adminAuth, email, password);
       
       // Firestore'a kaydet
       const userDocWithId: User = {
@@ -159,23 +171,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         id: user.uid
       };
       await setDoc(doc(db, 'users', user.uid), userDocWithId);
-      
-      // Orijinal kullanıcıyı ZORLA restore et
-      if (originalUser && originalUserData) {
-        console.log('🔄 Force restoring original user');
-        setCurrentUser(originalUser);
-        setUserData(originalUserData);
-      }
-      
-      // 2 saniye sonra bypass'ı kaldır (daha uzun süre)
-      setTimeout(() => {
-        console.log('🔓 Bypass deactivated');
-        setBypassAuthChange(false);
-      }, 2000);
-      
     } catch (error) {
       console.error('Silent user creation error:', error);
-      setBypassAuthChange(false);
       throw error;
     }
   };
@@ -207,7 +204,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    await signOut(auth);
+    try {
+      // Presence cleanup - kullanıcıyı offline yap
+      if (currentUser) {
+        console.log('🚪 Logging out user:', currentUser.email);
+        
+        // Realtime Database'de presence'i güncelle
+        const { getDatabase, ref, set, serverTimestamp } = await import('firebase/database');
+        const db = getDatabase();
+        const userPresenceRef = ref(db, `presence/${currentUser.uid}`);
+        
+        await set(userPresenceRef, {
+          status: 'offline',
+          lastSeen: serverTimestamp(),
+          email: currentUser.email,
+          displayName: currentUser.displayName || 'Anonim'
+        });
+        
+        console.log('✅ User presence set to offline');
+      }
+      
+      // Firebase Auth'dan çıkış yap
+      await signOut(auth);
+      console.log('✅ User signed out successfully');
+      
+    } catch (error) {
+      console.error('❌ Logout error:', error);
+      // Hata olsa bile çıkış yapmaya devam et
+      await signOut(auth);
+    }
   };
 
   useEffect(() => {
@@ -289,6 +314,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     createUserSilently,
     createUserAndReturn,
     logout,
+    startTeacherTrial,
   };
 
   return (

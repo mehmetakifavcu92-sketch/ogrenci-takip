@@ -104,14 +104,14 @@ const Register: React.FC = () => {
            package: formData.package,
            packageStartDate: now,
            packageEndDate: isTrialPackage 
-             ? new Date(now.getTime() + 24 * 60 * 60 * 1000) // 24 saat sonra
+             ? new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000) // 3 gün sonra
              : new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000), // 30 gün sonra
            studentLimit: packageInfo?.studentLimit || 10,
            // Deneme paketi için özel alanlar
            ...(isTrialPackage && {
              isTrialActive: true,
              trialStartDate: now,
-             trialEndDate: new Date(now.getTime() + 24 * 60 * 60 * 1000)
+             trialEndDate: new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000)
            })
          };
 
@@ -122,13 +122,13 @@ const Register: React.FC = () => {
          
          const packageDetails = PACKAGES.find(p => p.type === formData.package);
          const packageText = isTrialPackage 
-           ? `${packageDetails?.name} (Ücretsiz - 24 saat geçerli - ${packageDetails?.studentLimit} öğrenci)`
+           ? `${packageDetails?.name} (Ücretsiz - 3 gün geçerli - ${packageDetails?.studentLimit} öğrenci)`
            : `${packageDetails?.name} (₺${packageDetails?.price}/ay - ${packageDetails?.studentLimit === -1 ? 'Sınırsız' : packageDetails?.studentLimit} öğrenci)`;
            
          setSuccessMessage(`Öğretmen hesabı başarıyla oluşturuldu! 🎉 
            E-posta: ${formData.email} | Şifre: ${formData.password}
            Paket: ${packageText}
-           ${isTrialPackage ? '⚠️ 24 saat sonra deneme süresi dolacaktır.' : ''}`);
+           ${isTrialPackage ? '⚠️ 3 gün sonra deneme süresi dolacaktır.' : ''}`);
          
          // 8 saniye sonra mesajı kaldır
          setTimeout(() => setSuccessMessage(''), 8000);
@@ -451,7 +451,7 @@ const Register: React.FC = () => {
                               ✅ Ücretsiz Deneme
                             </span>
                             <p className="text-xs text-orange-700 font-medium">
-                              ⚠️ 24 saat sonra otomatik olarak iptal olur
+                              ⚠️ 3 gün sonra otomatik olarak iptal olur
                             </p>
                           </div>
                         ) : (

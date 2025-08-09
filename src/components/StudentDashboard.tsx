@@ -58,6 +58,9 @@ const StudentDashboard: React.FC = () => {
     return saved ? new Date(saved) : new Date();
   });
   const [activityStatuses, setActivityStatuses] = useState<{[key: string]: 'todo' | 'doing' | 'done'}>({});
+  const [confettiFiredForWeek, setConfettiFiredForWeek] = useState<string | null>(null);
+
+  // Not: Konfeti geçici olarak devre dışı
 
   
   // Toast notification state
@@ -1952,6 +1955,14 @@ const StudentDashboard: React.FC = () => {
     return new Date(d.setDate(diff));
   };
 
+  useEffect(() => {
+    // Yeni haftada konfeti tekrar aktif edilsin
+    setConfettiFiredForWeek(null);
+  }, [selectedWeek]);
+
+  // Haftalık yüzde 100 olduğunda (genel durum) konfeti tetikle - sadece bir kez
+  // Konfeti tetikleme kaldırıldı (stabilite için)
+
   const updateActivityStatus = async (activityId: string, status: 'todo' | 'doing' | 'done') => {
     try {
       // Check if status already exists
@@ -1979,10 +1990,12 @@ const StudentDashboard: React.FC = () => {
         });
       }
 
-      setActivityStatuses(prev => ({
-        ...prev,
-        [activityId]: status
-      }));
+      // State'i lokal olarak hesaplayıp haftalık yüzdeyi çıkaralım
+      let nextStatuses: {[key: string]: 'todo' | 'doing' | 'done'};
+      setActivityStatuses(prev => {
+        nextStatuses = { ...prev, [activityId]: status };
+        return nextStatuses;
+      });
 
       const statusTexts = {
         todo: 'Yapılacak olarak işaretlendi',
@@ -1990,6 +2003,35 @@ const StudentDashboard: React.FC = () => {
         done: 'Tamamlandı olarak işaretlendi'
       };
       showToast(statusTexts[status], 'success');
+
+      // Haftalık yüzde 100 olduğunda KONFETİ (tek sefer)
+      try {
+        const allActs = Object.values(getWeekProgram()).flat() as any[];
+        const total = allActs.length;
+        const doneCount = allActs.filter(a => (nextStatuses?.[a.id] || activityStatuses[a.id] || 'todo') === 'done').length;
+        const percent = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+        const weekKey = getStartOfWeek(selectedWeek).toISOString().slice(0,10);
+        if (percent === 100 && confettiFiredForWeek !== weekKey) {
+          const end = Date.now() + 800;
+          const colors = ['#16a34a', '#22c55e', '#10b981', '#34d399'];
+          const shoot = () => {
+            const angle = 60 + Math.random() * 60;
+            const spread = 55 + Math.random() * 25;
+            const startVelocity = 45 + Math.random() * 15;
+            const particleCount = 30 + Math.floor(Math.random() * 20);
+            // @ts-ignore
+            if (window.confetti) {
+              // @ts-ignore
+              window.confetti({ angle, spread, startVelocity, particleCount, colors, origin: { y: 0.3 } });
+            }
+          };
+          const interval = setInterval(() => {
+            if (Date.now() > end) clearInterval(interval);
+            else shoot();
+          }, 140);
+          setConfettiFiredForWeek(weekKey);
+        }
+      } catch {}
     } catch (error) {
       console.error('Activity status güncellenirken hata:', error);
       showToast('Durum güncellenirken hata oluştu', 'error');
@@ -2008,28 +2050,55 @@ const StudentDashboard: React.FC = () => {
 
   const getActivityStatusIcon = (activityId: string) => {
     const status = activityStatuses[activityId] || 'todo';
-    switch(status) {
-      case 'todo': return <Clock className="h-4 w-4 text-gray-500" />;
-      case 'doing': return <Timer className="h-4 w-4 text-yellow-500" />;
-      case 'done': return <CheckCircle className="h-4 w-4 text-green-500" />;
-      default: return <Clock className="h-4 w-4 text-gray-500" />;
+    const wrapperClass = 'bg-white/80 rounded-md p-1 ring-1 ring-black/10';
+    const iconClass = 'h-4 w-4 text-gray-900';
+    switch (status) {
+      case 'doing':
+        return <div className={wrapperClass}><Timer className={iconClass} /></div>;
+      case 'done':
+        return <div className={wrapperClass}><CheckCircle className={iconClass} /></div>;
+      case 'todo':
+      default:
+        return <div className={wrapperClass}><Clock className={iconClass} /></div>;
     }
   };
 
   const getSubjectColor = (subject: string) => {
     const colors: { [key: string]: string } = {
+      // Title-case (öğrenci tarafında gelebilir)
       'Matematik': 'bg-blue-500 text-white',
       'Fizik': 'bg-green-500 text-white',
       'Kimya': 'bg-purple-500 text-white',
       'Biyoloji': 'bg-emerald-500 text-white',
       'Türkçe': 'bg-red-500 text-white',
       'Tarih': 'bg-orange-500 text-white',
-      'Coğrafya': 'bg-yellow-500 text-black', // sarıda siyah yazı
+      'Coğrafya': 'bg-yellow-500 text-black',
       'Felsefe': 'bg-indigo-500 text-white',
-      'İngilizce': 'bg-pink-500 text-white'
+      'İngilizce': 'bg-pink-500 text-white',
+      // Lowercase ASCII (öğretmen kaydederken gelebilir)
+      'matematik': 'bg-blue-500 text-white',
+      'fizik': 'bg-green-500 text-white',
+      'kimya': 'bg-purple-500 text-white',
+      'biyoloji': 'bg-emerald-500 text-white',
+      'turkce': 'bg-red-500 text-white',
+      'tarih': 'bg-orange-500 text-white',
+      'cografya': 'bg-yellow-500 text-black',
+      'felsefe': 'bg-indigo-500 text-white',
+      'ingilizce': 'bg-pink-500 text-white',
+      'diger': 'bg-gray-500 text-white'
     };
-    const result = colors[subject] || 'bg-gray-500 text-white';
-    console.log('🎨 Öğrenci panel renk:', { subject, result });
+    const normalize = (s: string) =>
+      s
+        .toLowerCase()
+        .replace(/ğ/g, 'g')
+        .replace(/ü/g, 'u')
+        .replace(/ş/g, 's')
+        .replace(/ı/g, 'i')
+        .replace(/ö/g, 'o')
+        .replace(/ç/g, 'c');
+    const keyDirect = subject || '';
+    const keyNormalized = normalize(subject || '');
+    const result = colors[keyDirect] || colors[keyNormalized] || 'bg-gray-500 text-white';
     return result;
   };
 
@@ -2429,13 +2498,12 @@ const StudentDashboard: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Öğrenci Paneli</h1>
-        <div className="text-sm text-gray-500">
-          Hoş geldiniz, {userData?.name}
+      {/* Header - kaldırıldı */}
+      {false && (
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold text-gray-900">Öğrenci Paneli</h1>
         </div>
-      </div>
+      )}
 
       {/* Tabs */}
       <div className="border-b border-gray-200">
@@ -2475,24 +2543,10 @@ const StudentDashboard: React.FC = () => {
       {/* Ana Sayfa Tab */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
-          {/* Hoş Geldiniz Bölümü */}
-          <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-6 border border-blue-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900 mb-2">
-                  Merhaba {userData?.name?.split(' ')[0]}! 👋
-                </h1>
-                <p className="text-gray-600">
-                  Bugün de harika bir gün olsun! Çalışma hedeflerine doğru ilerlemen için buradayız.
-                </p>
-              </div>
-              <div className="hidden md:block">
-                <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center">
-                  <GraduationCap className="h-10 w-10 text-blue-600" />
-                </div>
-              </div>
-            </div>
-          </div>
+          {/* Hoş Geldiniz Bölümü - kaldırıldı */}
+          {false && (
+            <div />
+          )}
 
           {/* Progress Overview */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -2943,6 +2997,21 @@ const StudentDashboard: React.FC = () => {
 
               </div>
               <div className="flex items-center space-x-4">
+                {/* İlerleme Çubuğu - tarih navigasyonunun yanında */}
+                {(() => {
+                  const all = Object.values(getWeekProgram()).flat() as any[];
+                  const total = all.length;
+                  const done = all.filter(a => (activityStatuses[a.id] || 'todo') === 'done').length;
+                  const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+                  return (
+                    <div className="flex items-center gap-3 mr-2">
+                      <div className="w-56 h-3 bg-gray-100 rounded-full ring-1 ring-black/10 shadow-sm overflow-hidden">
+                        <div className="h-full bg-gradient-to-r from-green-500 via-emerald-400 to-green-600 rounded-full transition-all duration-500" style={{ width: `${percent}%` }} />
+                      </div>
+                      <span className="text-xs font-semibold text-gray-800 tabular-nums">%{percent}</span>
+                    </div>
+                  );
+                })()}
                 <div className="flex items-center space-x-2">
                   <button 
                     onClick={() => setSelectedWeek(new Date(selectedWeek.getTime() - 7 * 24 * 60 * 60 * 1000))}
@@ -2981,14 +3050,33 @@ const StudentDashboard: React.FC = () => {
 
               return (
                 <div key={day} className="bg-white rounded-xl shadow-sm border overflow-hidden">
-                  {/* Gün Başlığı */}
-                  <div className="bg-gradient-to-r from-blue-500 to-purple-500 text-white p-4">
+                  {/* Gün Başlığı + Günlük ilerleme (overlay) */}
+                  <div className="relative bg-gradient-to-r from-blue-500 to-purple-500 text-white p-4">
                     <div className="text-center">
                       <h3 className="font-semibold">{dayName}</h3>
                       <p className="text-sm opacity-90">
                         {currentDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })}
                       </p>
                     </div>
+                    {(() => {
+                      const dayActs = dayActivities as any[];
+                      const t = dayActs.length;
+                      const d = dayActs.filter(a => (activityStatuses[a.id] || 'todo') === 'done').length;
+                      const p = t > 0 ? Math.round((d / t) * 100) : 0;
+                      const barColor = p >= 75
+                        ? 'from-green-400 to-emerald-500'
+                        : p >= 40
+                        ? 'from-yellow-400 to-amber-500'
+                        : 'from-red-400 to-rose-500';
+                      return (
+                        <div className="absolute top-2 right-2 flex items-center gap-2">
+                          <div className="w-24 h-2 bg-white/30 rounded-full overflow-hidden ring-1 ring-white/30">
+                            <div className={`h-2 rounded-full transition-all bg-gradient-to-r ${barColor}`} style={{ width: `${p}%` }} />
+                          </div>
+                          <span className="text-xs font-semibold drop-shadow">%{p}</span>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Aktiviteler */}
@@ -3024,43 +3112,29 @@ const StudentDashboard: React.FC = () => {
                               )}
                             </div>
                             
-                            {/* Durum Butonları */}
-                            <div className="mt-3 flex space-x-1">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  updateActivityStatus(activity.id, 'todo');
-                                }}
-                                className={`px-2 py-1 text-xs rounded ${
-                                  status === 'todo' ? 'bg-white/30' : 'bg-white/10 hover:bg-white/20'
-                                }`}
-                                title="Yapılacak"
-                              >
-                                📋
-                              </button>
+                            {/* Durum Butonları - modern rozet stil */}
+                            <div className="mt-3 flex flex-wrap gap-2">
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   updateActivityStatus(activity.id, 'doing');
                                 }}
-                                className={`px-2 py-1 text-xs rounded ${
-                                  status === 'doing' ? 'bg-white/30' : 'bg-white/10 hover:bg-white/20'
+                                className={`px-3 py-1.5 text-[11px] whitespace-nowrap rounded-full font-medium inline-flex items-center gap-1 ring-1 ring-black/10 shadow-sm ${
+                                  status === 'doing' ? 'bg-white/90 text-gray-900' : 'bg-white/70 hover:bg-white/90 text-gray-800'
                                 }`}
-                                title="Yapılıyor"
                               >
-                                ⏳
+                                <Timer className="h-3 w-3" /> Yapılıyor
                               </button>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   updateActivityStatus(activity.id, 'done');
                                 }}
-                                className={`px-2 py-1 text-xs rounded ${
-                                  status === 'done' ? 'bg-white/30' : 'bg-white/10 hover:bg-white/20'
+                                className={`px-3 py-1.5 text-[11px] whitespace-nowrap rounded-full font-medium inline-flex items-center gap-1 ring-1 ring-black/10 shadow-sm ${
+                                  status === 'done' ? 'bg-white/90 text-gray-900' : 'bg-white/70 hover:bg-white/90 text-gray-800'
                                 }`}
-                                title="Tamamlandı"
                               >
-                                ✅
+                                <CheckCircle className="h-3 w-3" /> Tamamlandı
                               </button>
                             </div>
                           </div>
@@ -3098,67 +3172,9 @@ const StudentDashboard: React.FC = () => {
             </div>
           )}
 
-          {/* İstatistikler */}
-          {Object.values(getWeekProgram()).flat().length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="bg-white rounded-xl shadow-sm p-4 border">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <Clock className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-gray-900">
-                      {Object.values(getWeekProgram()).flat().length}
-                    </p>
-                    <p className="text-sm text-gray-500">Toplam Görev</p>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="bg-white rounded-xl shadow-sm p-4 border">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                    <CheckCircle className="h-5 w-5 text-green-600" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-gray-900">
-                      {Object.values(getWeekProgram()).flat().filter((a: any) => activityStatuses[a.id] === 'done').length}
-                    </p>
-                    <p className="text-sm text-gray-500">Tamamlanan</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-xl shadow-sm p-4 border">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center">
-                    <Timer className="h-5 w-5 text-yellow-600" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-gray-900">
-                      {Object.values(getWeekProgram()).flat().filter((a: any) => activityStatuses[a.id] === 'doing').length}
-                    </p>
-                    <p className="text-sm text-gray-500">Devam Eden</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-xl shadow-sm p-4 border">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                    <Target className="h-5 w-5 text-purple-600" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-gray-900">
-                      {Object.values(getWeekProgram()).flat().length > 0 ? 
-                        Math.round((Object.values(getWeekProgram()).flat().filter((a: any) => activityStatuses[a.id] === 'done').length / 
-                        Object.values(getWeekProgram()).flat().length) * 100) : 0}%
-                    </p>
-                    <p className="text-sm text-gray-500">Tamamlama</p>
-                  </div>
-                </div>
-              </div>
-            </div>
+          {/* İstatistikler - kaldırıldı */}
+          {false && Object.values(getWeekProgram()).flat().length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4"></div>
           )}
         </div>
       )}

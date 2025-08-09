@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { collection, query, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { usePresence } from '../contexts/PresenceContext';
+import { collection, query, getDocs, deleteDoc, doc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { User, UserRole } from '../types';
 import { 
@@ -22,7 +23,9 @@ import {
   Phone,
   Package,
   Clock,
-  Trash2 as TrashIcon
+  Trash2 as TrashIcon,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -36,12 +39,13 @@ const convertTimestamp = (timestamp: any): Date => {
 
 const AdminDashboard: React.FC = () => {
   const { userData } = useAuth();
+  const { onlineUsers, userStatus } = usePresence();
   const navigate = useNavigate();
   const [teachers, setTeachers] = useState<User[]>([]);
   const [students, setStudents] = useState<User[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'teachers' | 'students' | 'users' | 'relationships' | 'statistics'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'teachers' | 'students' | 'users' | 'relationships' | 'statistics' | 'online' | 'trial'>('overview');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -80,6 +84,16 @@ const AdminDashboard: React.FC = () => {
       // 8 saniye sonra mesajı kaldır (şifre bilgisi için daha uzun)
       setTimeout(() => setSuccessMessage(''), 8000);
     }
+
+    // Realtime users listener
+    const unsub = onSnapshot(collection(db, 'users'), (snap) => {
+      const allUsersData = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as User[];
+      setAllUsers(allUsersData);
+      setTeachers(allUsersData.filter(u => u.role === 'teacher'));
+      setStudents(allUsersData.filter(u => u.role === 'student'));
+    });
+
+    return () => unsub();
   }, []);
 
   const loadData = async () => {
@@ -93,6 +107,13 @@ const AdminDashboard: React.FC = () => {
       })) as User[];
       
       console.log('Tüm kullanıcılar:', allUsersData);
+      
+      // Trial kullanıcıları kontrol et
+      const trialUsers = allUsersData.filter(user => 
+        user.package === 'trial' && user.trialEndDate
+      );
+      
+      console.log('Trial kullanıcıları:', trialUsers);
       
       // Tüm kullanıcıları set et
       setAllUsers(allUsersData);
@@ -154,14 +175,8 @@ const AdminDashboard: React.FC = () => {
   const cleanupFirestoreUsers = async () => {
     const confirmed = window.confirm(
       '⚠️ VERİTABANI TEMİZLEME ⚠️\n\n' +
-      'Bu işlem Authentication\'da BULUNMAYAN tüm kullanıcıları Firestore\'dan silecek.\n\n' +
-      'Şu anda Authentication\'da:\n' +
-      '• 3 kullanıcı var\n' +
-      '• Firestore\'da 21 kullanıcı var\n' +
-      '• 18 fazla kullanıcı silinecek\n\n' +
-      'SADECE şu kullanıcılar KALACAK:\n' +
-      '• Admin hesabı\n' +
-      '• 2 öğretmen hesabı\n\n' +
+      'Bu işlem Authentication\'da OLAN maillere göre Firestore kullanıcılarını senkronlar.\n' +
+      'Listeye yazmadığınız mail\'e ait Firestore kayıtları SİLİNECEK.\n\n' +
       'GERİ ALINMAZ! Devam etmek istediğinizden emin misiniz?'
     );
     
@@ -170,9 +185,9 @@ const AdminDashboard: React.FC = () => {
     try {
       // Authentication'da olan aktif kullanıcıları belirle
       const keepEmails = prompt(
-        'Güvenlik için: Authentication\'da KALAN 3 email adresini virgül ile ayırarak yazın:\n\n' +
+        'Authentication > Users sayfasındaki TÜM email\'leri virgülle AYIRARAK yapıştırın.\n\n' +
         'Örnek: admin@email.com, ogretmen1@email.com, ogretmen2@email.com\n\n' +
-        'Bu emailler dışında tüm kullanıcılar silinecek!'
+        'Liste dışındaki Firestore kullanıcıları SİLİNECEK.'
       );
 
       if (!keepEmails) {
@@ -180,17 +195,13 @@ const AdminDashboard: React.FC = () => {
         return;
       }
 
-      const keepEmailList = keepEmails.split(',').map(email => email.trim().toLowerCase());
-      
-      if (keepEmailList.length !== 3) {
-        alert('Hata: Tam olarak 3 email adresi girmelisiniz!');
-        return;
-      }
+      const keepEmailList = keepEmails.split(',').map(email => email.trim().toLowerCase()).filter(Boolean);
 
       // Silinecek kullanıcıları bul
-      const usersToDelete = allUsers.filter(user => 
-        !keepEmailList.includes(user.email.toLowerCase())
-      );
+      const usersToDelete = allUsers.filter(user => {
+        const mail = (user.email || '').toLowerCase();
+        return mail && !keepEmailList.includes(mail);
+      });
 
       if (usersToDelete.length === 0) {
         alert('Silinecek kullanıcı bulunamadı.');
@@ -240,6 +251,18 @@ const AdminDashboard: React.FC = () => {
     } catch (error) {
       console.error('Toplu silme hatası:', error);
       alert('Toplu silme işlemi sırasında hata oluştu!');
+    }
+  };
+
+  // Firestore ve Authentication silme akışı (client tarafında Auth silme mümkün değil uyarısı)
+  const deleteUserCompletely = async (userId: string, userEmail: string, userName: string) => {
+    if (!window.confirm(`${userName} kullanıcısını kalıcı olarak silmek istediğinize emin misiniz?`)) return;
+    try {
+      await deleteDoc(doc(db, 'users', userId));
+      alert(`${userName} Firestore'dan silindi. Authentication silme için sunucu fonksiyonu gereklidir.`);
+    } catch (error) {
+      console.error('Kullanıcı silinirken hata:', error);
+      alert('Kullanıcı silinirken hata oluştu');
     }
   };
 
@@ -366,7 +389,9 @@ const AdminDashboard: React.FC = () => {
             { id: 'students', label: 'Öğrenciler', icon: GraduationCap },
             { id: 'users', label: 'Tüm Kullanıcılar', icon: Shield },
             { id: 'relationships', label: 'Öğrenci-Öğretmen İlişkileri', icon: Users },
-            { id: 'statistics', label: 'İstatistikler', icon: Shield }
+            { id: 'statistics', label: 'İstatistikler', icon: Shield },
+            { id: 'online', label: 'Çevrimiçi Kullanıcılar', icon: Wifi },
+            { id: 'trial', label: 'Deneme Kullanıcıları', icon: Clock }
           ].map((tab) => {
             const Icon = tab.icon;
             return (
@@ -392,7 +417,7 @@ const AdminDashboard: React.FC = () => {
         <div className="space-y-6">
           <h2 className="text-xl font-semibold text-gray-900">Sistem Genel Bakış</h2>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="card">
               <div className="flex items-center space-x-3">
                 <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
@@ -425,6 +450,18 @@ const AdminDashboard: React.FC = () => {
                 <div>
                   <p className="text-sm text-gray-500">Aktif Sistem</p>
                   <p className="text-2xl font-bold text-gray-900">✓</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="flex items-center space-x-3">
+                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                  <Wifi className="h-6 w-6 text-green-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Çevrimiçi Kullanıcı</p>
+                  <p className="text-2xl font-bold text-green-600">{onlineUsers.length}</p>
                 </div>
               </div>
             </div>
@@ -1029,6 +1066,96 @@ const AdminDashboard: React.FC = () => {
               })}
               {teachers.length === 0 && (
                 <p className="text-gray-500 text-center py-4">Henüz öğretmen bulunmuyor</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Online Users Tab */}
+      {activeTab === 'online' && (
+        <div className="space-y-6">
+          <h2 className="text-xl font-semibold text-gray-900">Çevrimiçi Kullanıcılar</h2>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="card">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Çevrimiçi Durumu</h3>
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Toplam Çevrimiçi</span>
+                  <span className="font-medium text-green-600">{onlineUsers.length}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Toplam Kullanıcı</span>
+                  <span className="font-medium">{allUsers.length}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Çevrimiçi Oranı</span>
+                  <span className="font-medium">
+                    {allUsers.length > 0 ? ((onlineUsers.length / allUsers.length) * 100).toFixed(1) : '0'}%
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="card">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Hızlı Durum</h3>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                  <span className="text-sm text-gray-600">Çevrimiçi</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                  <span className="text-sm text-gray-600">Uzakta</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-gray-400 rounded-full"></div>
+                  <span className="text-sm text-gray-600">Çevrimdışı</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Kullanıcı Durumları</h3>
+            <div className="space-y-3">
+              {allUsers.map((user) => {
+                const status = userStatus[user.id] || 'offline';
+                const isOnline = onlineUsers.includes(user.id);
+                
+                return (
+                  <div key={user.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-3 h-3 rounded-full ${
+                        status === 'online' ? 'bg-green-500 animate-pulse' :
+                        status === 'away' ? 'bg-yellow-500' : 'bg-gray-400'
+                      }`}></div>
+                      <div>
+                        <p className="font-medium text-gray-900">{user.name}</p>
+                        <p className="text-sm text-gray-500">{user.email} • {user.role}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs px-2 py-1 rounded-full ${
+                        status === 'online' ? 'bg-green-100 text-green-800' : 
+                        status === 'away' ? 'bg-yellow-100 text-yellow-800' : 
+                        'bg-gray-100 text-gray-600'
+                      }`}>
+                        {status === 'online' ? 'Çevrimiçi' : 
+                         status === 'away' ? 'Uzakta' : 'Çevrimdışı'}
+                      </span>
+                      {isOnline && <Wifi className="h-4 w-4 text-green-500" />}
+                    </div>
+                  </div>
+                );
+              })}
+              {allUsers.length === 0 && (
+                <div className="text-center py-8">
+                  <WifiOff className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">Henüz kullanıcı yok</h3>
+                  <p className="text-gray-500">Sistem kullanıcıları burada görünecek</p>
+                </div>
               )}
             </div>
           </div>

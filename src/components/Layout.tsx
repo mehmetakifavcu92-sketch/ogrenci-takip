@@ -1,23 +1,44 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { LogOut, Menu, X, User, Settings, ChevronDown, GraduationCap, Users } from 'lucide-react';
+import { LogOut, Menu, X, User, Settings, ChevronDown, GraduationCap, Users, Plus } from 'lucide-react';
 import { PACKAGES } from '../types';
-import { collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, getDocs, onSnapshot, addDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import Logo from './Logo';
+import Toast from './Toast';
+
+// TrialWarning import'u kaldırıldı
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
-  const { userData, logout } = useAuth();
+  const { userData, logout, createUserSilently } = useAuth();
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [activeStudentsCount, setActiveStudentsCount] = useState(0);
   const [studentsLoading, setStudentsLoading] = useState(true);
   const [teacherData, setTeacherData] = useState<any>(null);
+  const [showAddStudentModal, setShowAddStudentModal] = useState(false);
+  const [studentForm, setStudentForm] = useState({
+    name: '',
+    email: '',
+    username: '',
+    password: '',
+    confirmPassword: ''
+  });
+  const [toast, setToast] = useState<{
+    message: string;
+    type: 'success' | 'error' | 'warning' | 'info';
+    isVisible: boolean;
+  }>({
+    message: '',
+    type: 'success',
+    isVisible: false
+  });
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const overlayClickStartedRef = useRef(false);
 
   // Paket bilgileri (sadece öğretmenler için)
   const currentPackage = useMemo(() => {
@@ -79,6 +100,19 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     };
   }, []);
 
+  // Öğrenci Ekle modalı için ESC ile kapatma
+  useEffect(() => {
+    if (!showAddStudentModal) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowAddStudentModal(false);
+        resetStudentForm();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [showAddStudentModal]);
+
   // Öğrenci için öğretmen bilgilerini yükle
   useEffect(() => {
     const loadTeacherData = async () => {
@@ -120,8 +154,99 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     }
   };
 
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info') => {
+    setToast({
+      message,
+      type,
+      isVisible: true
+    });
+  };
+
+  const resetStudentForm = () => {
+    setStudentForm({
+      name: '',
+      email: '',
+      username: '',
+      password: '',
+      confirmPassword: ''
+    });
+  };
+
+  const addStudent = async () => {
+    if (!studentForm.name || !studentForm.email || !studentForm.username || !studentForm.password) {
+      showToast('Lütfen tüm alanları doldurun', 'error');
+      return;
+    }
+
+    if (studentForm.password !== studentForm.confirmPassword) {
+      showToast('Şifreler uyuşmuyor', 'error');
+      return;
+    }
+
+    if (studentForm.password.length < 6) {
+      showToast('Şifre en az 6 karakter olmalıdır', 'error');
+      return;
+    }
+
+    try {
+      // E-posta kontrolü
+      const emailQuery = query(collection(db, 'users'), where('email', '==', studentForm.email));
+      const emailSnapshot = await getDocs(emailQuery);
+      
+      if (!emailSnapshot.empty) {
+        showToast('Bu e-posta adresi zaten kullanımda', 'error');
+        return;
+      }
+
+      // Kullanıcı adı kontrolü
+      const usernameQuery = query(collection(db, 'users'), where('username', '==', studentForm.username));
+      const usernameSnapshot = await getDocs(usernameQuery);
+      
+      if (!usernameSnapshot.empty) {
+        showToast('Bu kullanıcı adı zaten kullanımda', 'error');
+        return;
+      }
+
+      // Öğrenci verilerini hazırla
+      const studentData = {
+        name: studentForm.name,
+        email: studentForm.email,
+        username: studentForm.username,
+        role: 'student' as const,
+        teacherId: userData?.id,
+        createdAt: new Date(),
+        lastActivity: new Date(),
+        isActive: true,
+        isFirstLogin: true
+      };
+
+      // createUserSilently fonksiyonunu kullan
+      await createUserSilently(studentForm.email, studentForm.password, studentData);
+
+      showToast(`🎉 ${studentForm.name} başarıyla eklendi! Giriş bilgileri paylaşıldı.`, 'success');
+      setShowAddStudentModal(false);
+      resetStudentForm();
+      
+      // Öğrenci paneline gitmeyi engelle - sadece modal'ı kapat
+      
+    } catch (error: any) {
+      console.error('Öğrenci ekleme hatası:', error);
+      if (error.code === 'auth/email-already-in-use') {
+        showToast('Bu e-posta adresi zaten kullanımda', 'error');
+      } else if (error.code === 'auth/invalid-email') {
+        showToast('Geçersiz e-posta adresi', 'error');
+      } else if (error.code === 'auth/weak-password') {
+        showToast('Şifre çok zayıf', 'error');
+      } else {
+        showToast('Öğrenci eklenirken hata oluştu: ' + error.message, 'error');
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Trial Warning Component - Kaldırıldı */}
+      
       {/* Header */}
       <header className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -149,6 +274,17 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <div id="teacher-student-selector" className="flex items-center space-x-2">
                   {/* Bu alan TeacherDashboard tarafından doldurulacak */}
                 </div>
+              )}
+              
+              {/* Öğrenci Ekle Butonu (sadece öğretmenler için) */}
+              {userData?.role === 'teacher' && (
+                <button
+                  onClick={() => setShowAddStudentModal(true)}
+                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-2"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span className="hidden sm:inline">Öğrenci Ekle</span>
+                </button>
               )}
               
               {/* Profil Dropdown Menüsü */}
@@ -339,6 +475,146 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {children}
       </main>
+
+      {/* Öğrenci Ekleme Modal */}
+      {showAddStudentModal && (
+        <div 
+          className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-start justify-center z-50 backdrop-blur-sm"
+          style={{ 
+            backdropFilter: 'blur(8px)', 
+            WebkitBackdropFilter: 'blur(8px)', 
+            margin: 0, 
+            padding: 0,
+            top: 0,
+            left: 0
+          }}
+          onMouseDown={(e) => {
+            // Close only if the press STARTED on overlay
+            overlayClickStartedRef.current = e.target === e.currentTarget;
+          }}
+          onMouseUp={(e) => {
+            if (e.target === e.currentTarget && overlayClickStartedRef.current) {
+              setShowAddStudentModal(false);
+              resetStudentForm();
+            }
+            overlayClickStartedRef.current = false;
+          }}
+        >
+          <div 
+            className="bg-white rounded-xl p-6 w-full max-w-md mx-4 modal-content relative z-10"
+            style={{ marginTop: '8px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">
+                👨‍🎓 Yeni Öğrenci Ekle
+              </h3>
+              <button 
+                onClick={() => {
+                  setShowAddStudentModal(false);
+                  resetStudentForm();
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); addStudent(); }}>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Ad Soyad *
+                </label>
+                <input
+                  type="text"
+                  value={studentForm.name}
+                  onChange={(e) => setStudentForm(prev => ({ ...prev, name: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Öğrenci adı soyadı"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  E-posta *
+                </label>
+                <input
+                  type="email"
+                  value={studentForm.email}
+                  onChange={(e) => setStudentForm(prev => ({ ...prev, email: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="ornek@email.com"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Kullanıcı Adı *
+                </label>
+                <input
+                  type="text"
+                  value={studentForm.username}
+                  onChange={(e) => setStudentForm(prev => ({ ...prev, username: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="kullaniciadi"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Şifre *
+                </label>
+                <input
+                  type="password"
+                  value={studentForm.password}
+                  onChange={(e) => setStudentForm(prev => ({ ...prev, password: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="En az 6 karakter"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Şifre Tekrar *
+                </label>
+                <input
+                  type="password"
+                  value={studentForm.confirmPassword}
+                  onChange={(e) => setStudentForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Şifreyi tekrar girin"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="submit"
+                  className="flex-1 bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-blue-600 active:scale-[0.98] transition"
+                >
+                  Öğrenci Ekle
+                </button>
+                <button
+                  onClick={() => {
+                    setShowAddStudentModal(false);
+                    resetStudentForm();
+                  }}
+                  className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition-colors"
+                >
+                  İptal
+                </button>
+              </div>
+            </form>
+          </div>
+                 </div>
+       )}
+
+      {/* Toast Notification */}
+      <Toast
+        message={toast.message}
+        type={toast.type}
+        isVisible={toast.isVisible}
+        onClose={() => setToast(prev => ({ ...prev, isVisible: false }))}
+      />
     </div>
   );
 };

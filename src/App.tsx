@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { PresenceProvider } from './contexts/PresenceContext';
 import Login from './components/Login';
 import Register from './components/Register';
 import Home from './components/Home';
@@ -121,7 +122,9 @@ const AppRoutes: React.FC = () => {
         path="/teacher" 
         element={
           <PrivateRoute allowedRoles={['teacher']}>
-            <TeacherDashboard />
+            <Layout>
+              <TeacherDashboard />
+            </Layout>
           </PrivateRoute>
         } 
       />
@@ -147,7 +150,9 @@ const App: React.FC = () => {
   return (
     <Router>
       <AuthProvider>
-        <AppRoutes />
+        <PresenceProvider>
+          <AppRoutes />
+        </PresenceProvider>
       </AuthProvider>
     </Router>
   );
